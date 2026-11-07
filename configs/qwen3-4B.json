@@ -1,0 +1,10 @@
+{
+    "model": "Qwen/Qwen3-4B",
+    "generation_specs": {
+        "max_new_tokens": 32768,
+        "do_sample": true,
+        "temperature": 0.6,
+        "top_k": 20,
+        "top_p": 0.95
+    }
+}

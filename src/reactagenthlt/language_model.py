@@ -31,7 +31,7 @@ class LanguageModel:
         self,
         messages: list[dict[str, str]],
         generation_specs: dict[str, typing.Any],
-    ) -> str | list[str]:
+    ) -> str:
         inputs = typing.cast(
             BatchEncoding,
             self.tokenizer.apply_chat_template(
@@ -47,4 +47,4 @@ class LanguageModel:
         outputs = generator.generate(**inputs, **generation_specs)
         generated = outputs[0, inputs["input_ids"].shape[-1] :]
 
-        return self.tokenizer.decode(generated, skip_special_tokens=True)
+        return str(self.tokenizer.decode(generated, skip_special_tokens=True))
