@@ -5,12 +5,7 @@ import time
 
 from colorama import Fore
 
-from reactagenthlt import Agent
-
-
-def remove_thinking(text: str) -> str:
-    return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
-
+import reactagenthlt as hlt
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -20,17 +15,20 @@ if __name__ == "__main__":
     system_prompt = """ provide just the answer to the question without
     explainations or details """
 
-    agent = Agent(args.config)
+    agent = hlt.Agent(args.config)
     agent.add_sys_prompt(system_prompt)
 
     while True:
         try:
-            prompt = input("> ")
+            prompt = input(f"{Fore.GREEN}User: {Fore.RESET}")
             start = time.perf_counter()
-            answer = remove_thinking(agent.prompt(prompt))
+            answer = hlt.remove_thinking(agent.prompt(prompt))
+
             end = time.perf_counter()
+            print(f"{Fore.LIGHTRED_EX}Agent:{Fore.RESET} {answer}")
             print(
-                f"< {answer}\t\t{Fore.GREEN}reponse in {end - start:.2f} seconds{Fore.RESET}"
+                f"""{Fore.LIGHTBLACK_EX}--- response in {end - start:.2f}s ---{Fore.RESET}"""
             )
         except EOFError:
+            print(f"\n{Fore.LIGHTRED_EX}Agent:{Fore.RESET} Bye")
             break
