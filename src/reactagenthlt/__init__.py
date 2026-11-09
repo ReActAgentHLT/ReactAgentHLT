@@ -1,7 +1,7 @@
-from . import agents, testing, utility
+from . import agents, evaluation, utility
 
 __all__ = [
     "agents",
-    "testing",
+    "evaluation",
     "utility",
 ]

@@ -1,8 +1,8 @@
 from collections import Counter
 
 
-def exact_match(predicted: str, target: str) -> float:
-    return 1.0 if predicted == target else 0.0
+def exact_match(predicted: str, target: str) -> int:
+    return 1 if predicted == target else 0
 
 
 def accuracy_score(predicted: str, target: str) -> float:
@@ -46,4 +46,3 @@ def f1_score(predicted: str, target: str) -> float:
 precision = precision_score
 recall = recall_score
 f1 = f1_score
-

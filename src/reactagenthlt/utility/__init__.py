@@ -8,6 +8,7 @@ from .metrics import (
     recall,
     recall_score,
 )
+from .parsing import parse_thinking
 
 __all__ = [
     "accuracy_score",
@@ -18,4 +19,5 @@ __all__ = [
     "recall_score",
     "f1",
     "f1_score",
+    "parse_thinking",
 ]

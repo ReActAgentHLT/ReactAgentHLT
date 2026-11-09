@@ -4,6 +4,7 @@ import time
 import typing
 from argparse import ArgumentParser
 
+import numpy as np
 import pandas as pd
 from colorama import Fore
 from datasets import load_dataset
@@ -16,13 +17,6 @@ from reactagenthlt.utility import (
     precision,
     recall,
 )
-
-
-def parse_thinking(content: str) -> list[str]:
-    match = re.search(r"<think>(.*?)</think>(.*)", content, flags=re.DOTALL)
-    if match:
-        return [match.group(1).strip(), match.group(2).strip()]
-    return ["", content.strip()]
 
 
 def normalize(content: str) -> str:
@@ -44,7 +38,7 @@ if __name__ == "__main__":
     df = typing.cast(
         pd.DataFrame,
         load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas(),
-    )[: args.num_samples]
+    )[5 : 5 + args.num_samples]
 
     agent = ChatBot(args.config)
     agent.add_sys_prompt(
@@ -53,6 +47,7 @@ if __name__ == "__main__":
         are evaluated against a ground truth answer that is very concise like
         'yes', 'no' or just the name of something"""
     )
+    # agent.add_sys_prompt("/no_think")
 
     questions = df["question"].to_list()
     ground_truths = df["answer"].to_list()
@@ -63,57 +58,79 @@ if __name__ == "__main__":
         "precision": [],
         "recall": [],
         "f1": [],
-        # "avg_new_tokens": [],
+        "thinking_tokens": [],
+        "answer_tokens": [],
         "time": [],
     }
 
     for question, target in zip(questions, ground_truths):
         start = time.perf_counter()
-        answer = parse_thinking(agent.ask(question))[1]
+        response = agent.ask(question)
         end = time.perf_counter()
 
+        print(f"{Fore.LIGHTRED_EX}Question:{Fore.RESET} {question}")
+        print(f"{Fore.GREEN}Ground truth:{Fore.RESET} {target}")
+        print(f"{Fore.YELLOW}Answer:{Fore.RESET} {response.answer}")
+
+        # always clear context to make the agent focus on single questions
+        agent.clear_context()
+
+        # lower case everything and remove punctuation
         target = normalize(target)
-        answer = normalize(answer)
+        answer = normalize(response.answer)
+        thinking = normalize(response.thinking)
 
         results["exact_match"].append(exact_match(answer, target))
         results["accuracy"].append(accuracy_score(answer, target))
         results["precision"].append(precision(answer, target))
         results["recall"].append(recall(answer, target))
         results["f1"].append(f1_score(answer, target))
-        results["time"].append(end - start)
 
-        print(f"{Fore.RED}question:{Fore.RESET} {question}")
-        print(f"{Fore.GREEN}ground truth:{Fore.RESET} {target}")
-        print(f"{Fore.YELLOW}answer:{Fore.RESET} {answer}")
-        print("-" * 50)
+        # log metrics for the current question
+        em = results["exact_match"][-1]
+        acc = results["accuracy"][-1]
+        prec = results["precision"][-1]
+        rec = results["recall"][-1]
+        f1 = results["f1"][-1]
+
+        avg_em = np.mean(results["exact_match"])
+        avg_accuracy = np.mean(results["accuracy"])
+        avg_precision = np.mean(results["precision"])
+        avg_recall = np.mean(results["recall"])
+        avg_f1 = np.mean(results["f1"])
+
+        print(f"exact_match: {em} - avg: {avg_em:.2f}")
+        print(f"accuracy: {acc:.2f} - avg: {avg_accuracy:.2f}")
+        print(f"precision: {prec:.2f} - avg: {avg_precision:.2f}")
+        print(f"recall: {rec:.2f} - avg: {avg_recall:.2f}")
+        print(f"f1: {f1:.2f} - {avg_f1:.2f}")
+
+        # tokens usage
+        thinking_tokens = response.usage.thinking_tokens
+        answer_tokens = response.usage.answer_tokens
+
+        results["thinking_tokens"].append(thinking_tokens)
+        results["answer_tokens"].append(answer_tokens)
+
+        avg_thinking_tokens = np.mean(results["thinking_tokens"])
+        avg_answer_tokens = np.mean(results["answer_tokens"])
+        print(f"thinking tokens: {thinking_tokens} - avg: {avg_thinking_tokens:.2f}")
+        print(f"answer tokens: {answer_tokens} - avg: {avg_answer_tokens:.2f}")
+
+        # time to answer a question
+        results["time"].append(end - start)
+        avg_time = np.mean(results["time"])
+        print(f"time: {results['time'][-1]:.2f}s - avg: {avg_time:.2f}s")
+
+        print("=" * 50)
+
+        # log metrics progression over the dataset
+        # print("Accumulated results")
+        # print(f"EM: {results['exact_match'][-1]}")
+        # print(f"Accuracy: {results['accuracy'][-1]}")
+        # print(f"Precision: {results['precision'][-1]}")
+        # print(f"Recall: {results['recall'][-1]}")
+        # print(f"F1: {results['f1'][-1]}")
+        # print("=" * 50)
 
     results_df = pd.DataFrame(results)
-    total_samples = len(results_df)
-    em_total = int(results_df["exact_match"].sum()) if not results_df.empty else 0
-    em_rate = (results_df["exact_match"].mean() * 100) if not results_df.empty else 0.0
-
-    acc_total = int(results_df["accuracy"].sum()) if not results_df.empty else 0
-    acc_rate = (results_df["accuracy"].mean() * 100) if not results_df.empty else 0.0
-
-    p_total = int(results_df["precision"].sum()) if not results_df.empty else 0
-    p_rate = (results_df["precision"].mean() * 100) if not results_df.empty else 0.0
-
-    r_total = int(results_df["recall"].sum()) if not results_df.empty else 0
-    r_rate = (results_df["recall"].mean() * 100) if not results_df.empty else 0.0
-
-    f1_total = int(results_df["f1"].sum()) if not results_df.empty else 0
-    f1_rate = (results_df["f1"].mean() * 100) if not results_df.empty else 0.0
-
-    avg_time = results_df["time"].mean() if not results_df.empty else 0.0
-    total_time = results_df["time"].sum() if not results_df.empty else 0.0
-
-    print("\n" + "=" * 50)
-    print(f"{Fore.CYAN}--- EVALUATION RESULTS ---{Fore.RESET}")
-    print(f"Exact Match (EM):        {em_total}/{total_samples} ({em_rate:.2f}%)")
-    print(f"Accuracy:                {acc_total}/{total_samples} ({acc_rate:.2f}%)")
-    print(f"Precision:                {p_total}/{total_samples} ({p_rate:.2f}%)")
-    print(f"Recall:                {r_total}/{total_samples} ({r_rate:.2f}%)")
-    print(f"F1 Score:                {f1_total}/{total_samples} ({f1_rate:.2f}%)")
-    print(f"Avg time per question:   {avg_time:.2f}s")
-    print(f"Total evaluation time:   {total_time:.2f}s")
-    print("=" * 50)

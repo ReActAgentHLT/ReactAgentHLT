@@ -10,12 +10,7 @@ from transformers import (
     TokenizersBackend,
 )
 
-
-def parse_thinking(content: str) -> list[str]:
-    match = re.search(r"<think>(.*?)</think>(.*)", content, flags=re.DOTALL)
-    if match:
-        return [match.group(1).strip(), match.group(2).strip()]
-    return ["", content.strip()]
+from reactagenthlt.utility import parse_thinking
 
 
 class SupportsGeneration(typing.Protocol):
@@ -80,9 +75,9 @@ class LanguageModel:
                 outputs[usage.prompt_tokens :], skip_special_tokens=True
             )
         )
-
         thinking, answer = parse_thinking(generated)
 
+        # tokenize thinking and answer separately to extract token usage
         tokenized_answer = self.tokenizer(answer, return_dict=True, return_tensors="pt")
         tokenized_thinking = self.tokenizer(
             thinking, return_dict=True, return_tensors="pt"
