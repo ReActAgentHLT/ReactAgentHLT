@@ -43,6 +43,7 @@ class LanguageModel:
             model_id, device_map="auto", torch_dtype="auto"
         )
         self.model.eval()
+        self.usage = TokenUsage()
 
     @torch.inference_mode()
     def generate(
@@ -85,5 +86,9 @@ class LanguageModel:
 
         usage.answer_tokens = tokenized_answer["input_ids"][0].shape[0]
         usage.thinking_tokens = tokenized_thinking["input_ids"][0].shape[0]
+
+        self.usage.prompt_tokens += usage.prompt_tokens
+        self.usage.answer_tokens += usage.answer_tokens
+        self.usage.thinking_tokens += usage.thinking_tokens
 
         return Response(answer, thinking, usage)

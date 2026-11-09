@@ -10,9 +10,12 @@ if __name__ == "__main__":
     parser.add_argument("config", type=str, help="path to agent config")
     args = parser.parse_args()
 
-    system_prompt = "you are an helpful assistant"
+    system_prompt = (
+        "you are an helpful assistant, try to answer as concisely"
+        + " as you can to every submitted question"
+    )
 
-    agent = hlt.agents.ChatBot(args.config)
+    agent = hlt.agents.Standard(args.config)
     agent.add_sys_prompt(system_prompt)
 
     while True:
@@ -35,7 +38,8 @@ if __name__ == "__main__":
             print(
                 f"{Fore.GREEN}---",
                 f"response in {end - start:.2f}s,",
-                f"token usage: {usage}",
+                f"generated tokens: {usage},",
+                f"total generated tokens: {agent.total_usage()}",
                 f"---{Fore.RESET}",
             )
         except EOFError:

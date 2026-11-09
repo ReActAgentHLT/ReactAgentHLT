@@ -9,7 +9,7 @@ import pandas as pd
 from colorama import Fore
 from datasets import load_dataset
 
-from reactagenthlt.agents import ChatBot
+from reactagenthlt.agents import Standard
 from reactagenthlt.utility import (
     accuracy_score,
     exact_match,
@@ -40,7 +40,7 @@ if __name__ == "__main__":
         load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas(),
     )[5 : 5 + args.num_samples]
 
-    agent = ChatBot(args.config)
+    agent = Standard(args.config)
     agent.add_sys_prompt(
         """answer concisely to submitted questions without explainations and
         without recovering what was asked in the question. Your answers

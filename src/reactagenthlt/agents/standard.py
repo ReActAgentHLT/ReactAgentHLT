@@ -4,7 +4,7 @@ from .agent import Agent
 from .language_model import LanguageModel, Response
 
 
-class ChatBot(Agent):
+class Standard(Agent):
     def __init__(self, config_path: str) -> None:
         with open(config_path, "r") as conf:
             config = dict(json.load(conf))
@@ -13,6 +13,13 @@ class ChatBot(Agent):
         self.generation_specs = config["generation_specs"]
         self.sys_prompts = []
         self.history = []
+
+    def total_usage(self) -> int:
+        return (
+            self.lm.usage.prompt_tokens
+            + self.lm.usage.answer_tokens
+            + self.lm.usage.thinking_tokens
+        )
 
     def add_sys_prompt(self, content: str) -> None:
         self.sys_prompts.append(

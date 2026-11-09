@@ -1,6 +1,6 @@
 from .agent import Agent
-from .chat import ChatBot
 from .language_model import LanguageModel
+from .standard import Standard
 
 __all__ = [
     "LanguageModel",
