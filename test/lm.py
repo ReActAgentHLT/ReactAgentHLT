@@ -1,6 +1,6 @@
 import re
 
-from reactagenthlt import LanguageModel
+from reactagenthlt.agents import LanguageModel
 
 
 def remove_thinking(text: str) -> str:
@@ -25,7 +25,7 @@ if __name__ == "__main__":
         "top_p": 0.95,
     }
 
-    agent = LanguageModel(model_id="Qwen/Qwen3-1.7B")
+    agent = LanguageModel(model_id="Qwen/Qwen3-0.6B")
     answer = str(agent.generate(messages, generation_specs))
     answer_without_thinking = remove_thinking(answer)
 

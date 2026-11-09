@@ -1,6 +1,4 @@
 import argparse
-import json
-import re
 import time
 
 from colorama import Fore
@@ -12,22 +10,33 @@ if __name__ == "__main__":
     parser.add_argument("config", type=str, help="path to agent config")
     args = parser.parse_args()
 
-    system_prompt = """ provide just the answer to the question without
-    explainations or details """
+    system_prompt = "you are an helpful assistant"
 
-    agent = hlt.Agent(args.config)
+    agent = hlt.agents.ChatBot(args.config)
     agent.add_sys_prompt(system_prompt)
 
     while True:
         try:
-            prompt = input(f"{Fore.GREEN}User: {Fore.RESET}")
+            prompt = input(f"{Fore.CYAN}User: {Fore.RESET}")
             start = time.perf_counter()
-            answer = hlt.remove_thinking(agent.prompt(prompt))
-
+            response = agent.ask(prompt)
             end = time.perf_counter()
-            print(f"{Fore.LIGHTRED_EX}Agent:{Fore.RESET} {answer}")
+
+            usage = (
+                response.usage.prompt_tokens
+                + response.usage.thinking_tokens
+                + response.usage.answer_tokens
+            )
+
+            if response.thinking != "":
+                print(f"Thinking: {Fore.LIGHTBLACK_EX}{response.thinking}{Fore.RESET}")
+
+            print(f"{Fore.LIGHTRED_EX}Response:{Fore.RESET} {response.answer}")
             print(
-                f"""{Fore.LIGHTBLACK_EX}--- response in {end - start:.2f}s ---{Fore.RESET}"""
+                f"{Fore.GREEN}---",
+                f"response in {end - start:.2f}s,",
+                f"token usage: {usage}",
+                f"---{Fore.RESET}",
             )
         except EOFError:
             print(f"\n{Fore.LIGHTRED_EX}Agent:{Fore.RESET} Bye")

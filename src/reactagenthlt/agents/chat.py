@@ -1,12 +1,11 @@
 import json
-import typing
 
-from .language_model import LanguageModel
+from .agent import Agent
+from .language_model import LanguageModel, Response
 
 
-class Agent:
+class ChatBot(Agent):
     def __init__(self, config_path: str) -> None:
-
         with open(config_path, "r") as conf:
             config = dict(json.load(conf))
 
@@ -23,7 +22,7 @@ class Agent:
             }
         )
 
-    def prompt(self, content: str) -> str:
+    def ask(self, content: str) -> Response:
         self.history.append(
             {
                 "role": "user",
@@ -33,7 +32,7 @@ class Agent:
         messages = self.sys_prompts + self.history
 
         response = self.lm.generate(messages, self.generation_specs)
-        self.history.append({"role": "assistant", "content": response})
+        self.history.append({"role": "assistant", "content": response.answer})
 
         return response
 
