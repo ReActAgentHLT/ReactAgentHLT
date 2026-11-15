@@ -50,8 +50,8 @@ def gsm8k(
         select if to return the `train` or `validation` split of the dataset
 
     reasoning: `bool`
-        if `False` returns only the raw numerical answer, if `True` also returns
-        the reasoning to build the right expression to evaluate
+        if `False` returns only the numerical answer as a string, with thousands
+        separators removed; if `True` preserves the full solution
 
     ## Returns
     A `DataFrame` containing the dataset with only `question` and `answer`
@@ -68,8 +68,20 @@ def gsm8k(
     )
 
     if not reasoning:
-        ds["answer"] = ds["answer"].str.extract(
-            r"####\s*([+-]?\d[\d,]*(?:\.\d+)?)\s*$", expand=False
+        answers = ds["answer"].str.extract(
+            r"####\s*([+-]?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?)\s*\Z",
+            expand=False,
         )
+        invalid = answers.isna()
+        if invalid.any():
+            examples = ds.loc[invalid, "answer"].head(3).to_dict()
+            raise ValueError(
+                f"Invalid GSM8K answer format in {int(invalid.sum())} row(s) "
+                f"(setting={setting!r}, split={split!r}). Expected '#### <number>' "
+                f"at the end, with optional sign, decimal point, and correctly "
+                f"grouped thousands commas. Example rows (index: answer): {examples!r}"
+            )
+        # OpenAI's reference evaluator treats commas as thousands separators.
+        ds["answer"] = answers.str.replace(",", "", regex=False)
 
     return ds
