@@ -4,13 +4,14 @@ version = "0.0.1"
 description = "Comparison on 3 types of different agents on QA and math problems"
 readme = "README.md"
 authors = [
-    { name = "FedericoBustaffa" }
+    { name = "Federico Bustaffa" }
 ]
 requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.15.0",
     "colorama>=0.4.6",
     "datasets>=5.1.0",
+    "evaluate>=0.4.6",
     "matplotlib>=3.11.2",
     "numpy>=2.5.4",
     "ollama>=0.6.3",
@@ -21,9 +22,10 @@ dependencies = [
     "transformers>=5.22.2",
 ]
 
-[project.scripts]
-reactagenthlt = "reactagenthlt:main"
-
 [build-system]
-requires = ["uv_build>=0.13.7,<0.14.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["reactagenthlt"]
+package-dir = { reactagenthlt = "reactagenthlt" }
