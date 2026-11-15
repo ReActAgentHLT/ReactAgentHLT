@@ -29,3 +29,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["reactagenthlt"]
 package-dir = { reactagenthlt = "reactagenthlt" }
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+    "ipywidgets>=8.1.9",
+    "notebook>=7.6.5",
+    "pyqt6>=6.12.1",
+]
