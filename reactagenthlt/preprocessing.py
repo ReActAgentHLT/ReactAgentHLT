@@ -33,6 +33,31 @@ def hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFrame:
     return ds[["question", "answer"]]
 
 
+def hotpotqa_kb() -> pd.DataFrame:
+    """
+    Build a knowledge base using the `context` field of HotPotQA in the
+    `distractor` setting and using the `validation` split to simulate a real web
+    search.
+
+    ## Returns
+    A `DataFrame` containing all the paragraphs contained in each context field
+    without duplicates.
+    """
+    ds = cast(
+        pd.DataFrame,
+        load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas(),
+    )
+
+    records = []
+    for row_index, context in ds["context"]:
+        titles = context["title"]
+        paragraphs = context["sentences"]
+        for title, paragraph in zip(titles, paragraphs):
+            records.append((title, paragraph))
+
+    return ds
+
+
 def gsm8k(
     setting: str = "main",
     train: bool = False,

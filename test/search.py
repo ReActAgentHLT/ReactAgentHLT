@@ -1,9 +1,6 @@
 import json
 
-from reactagenthlt import tools
+from reactagenthlt.preprocessing import hotpotqa_kb
 
 if __name__ == "__main__":
-    se = tools.SearchEngine(k=2)
-    results = se.search("something")
-
-    print(json.dumps(results, indent=2))
+    hotpotqa_kb()
