@@ -19,7 +19,7 @@ class RetrievalTokenizer:
     def tokenize(self, document: str) -> list[str]:
         return self.pattern.findall(document.lower())
 
-    def tokenize_corpus(self, corpus: pd.DataFrame) -> list[list[str]]:
+    def tokenize_corpus(self, corpus: pd.Series) -> list[list[str]]:
         return corpus.apply(self.tokenize).to_list()
 
 
@@ -43,22 +43,22 @@ class SearchEngine:
                 f"{search_by} is not a valid value for 'seach_by': possible values {'title', 'document'}"
             )
 
-        self.corpus = hotpotqa_corpus()[search_by]
+        self.corpus = hotpotqa_corpus()
         self.tokenizer = RetrievalTokenizer()
         self.top_k = top_k
 
         self.retriever = rank_bm25.BM25Okapi(
-            self.tokenizer.tokenize_corpus(self.corpus)
+            self.tokenizer.tokenize_corpus(self.corpus[search_by])
         )
 
-    def search(self, query: str) -> list[str]:
+    def search(self, query: str) -> pd.DataFrame:
         """
         Retrieve the `top_k` results for the given query
         """
         scores = self.retriever.get_scores(self.tokenizer.tokenize(query))
         indices = np.argsort(scores)[::-1][: self.top_k]
 
-        return self.corpus[indices].to_list()
+        return self.corpus.iloc[indices]
 
 
 # ======== MATH CALCULATOR ========

@@ -1,4 +1,3 @@
-import re
 from typing import cast
 
 import pandas as pd
@@ -110,8 +109,9 @@ def hotpotqa_corpus() -> pd.DataFrame:
         sentences = context["sentences"]  # list of lists of paragraphs
 
         for title, paragraphs in zip(titles, sentences):
-            document = title + "\n\n"
+            document = ""
             for paragraph in paragraphs:
+                # some paragraphs begins with a whitespace -> remove
                 document += paragraph.removeprefix(" ") + "\n"
 
             out["title"].append(title)
