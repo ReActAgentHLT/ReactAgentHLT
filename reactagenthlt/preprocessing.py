@@ -1,7 +1,9 @@
+import re
 from typing import cast
 
 import pandas as pd
 from datasets import load_dataset
+from tqdm import tqdm
 
 
 def hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFrame:
@@ -31,31 +33,6 @@ def hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFrame:
     )
 
     return ds[["question", "answer"]]
-
-
-def hotpotqa_kb() -> pd.DataFrame:
-    """
-    Build a knowledge base using the `context` field of HotPotQA in the
-    `distractor` setting and using the `validation` split to simulate a real web
-    search.
-
-    ## Returns
-    A `DataFrame` containing all the paragraphs contained in each context field
-    without duplicates.
-    """
-    ds = cast(
-        pd.DataFrame,
-        load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas(),
-    )
-
-    records = []
-    for row_index, context in ds["context"]:
-        titles = context["title"]
-        paragraphs = context["sentences"]
-        for title, paragraph in zip(titles, paragraphs):
-            records.append((title, paragraph))
-
-    return ds
 
 
 def gsm8k(
@@ -110,3 +87,36 @@ def gsm8k(
         ds["answer"] = answers.str.replace(",", "", regex=False)
 
     return ds
+
+
+def hotpotqa_corpus() -> pd.DataFrame:
+    """
+    Build a knowledge base using the `context` field of HotPotQA in the
+    `distractor` setting and using the `validation` split to simulate a real web
+    search.
+
+    ## Returns
+    A `DataFrame` containing all the paragraphs contained in each context field
+    without duplicates.
+    """
+    ds = cast(
+        pd.DataFrame,
+        load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas(),
+    )
+
+    out = {"title": [], "document": []}
+    for context in tqdm(ds["context"], desc="building corpus", ncols=80):
+        titles = context["title"]  # list of titles
+        sentences = context["sentences"]  # list of lists of paragraphs
+
+        for title, paragraphs in zip(titles, sentences):
+            document = title + "\n\n"
+            for paragraph in paragraphs:
+                document += paragraph.removeprefix(" ") + "\n"
+
+            out["title"].append(title)
+            out["document"].append(document)
+
+    df = pd.DataFrame(out)
+
+    return df.drop_duplicates(subset=["title", "document"]).reset_index(drop=True)
