@@ -63,8 +63,7 @@ class SearchEngine:
 
 # ======== MATH CALCULATOR ========
 class Calculator:
-    def __init__(self) -> None:
-        pass
+    """Simple calculator implementation with built-in `eval` function"""
 
-    # def calculate(self, expression: str) -> int | float:
-    #     pass
+    def calculate(self, expression: str) -> int | float:
+        return eval(expression)
