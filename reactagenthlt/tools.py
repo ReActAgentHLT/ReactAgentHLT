@@ -33,7 +33,10 @@ class SearchEngine:
     def __init__(self, search_by: str = "document", top_k: int = 3) -> None:
         """
         search_by: `str`
-            select if to search documents by document content or by title alone
+            select if to search documents by document content or by title alone.
+            The title mode will search within a collection of titles while the
+            document mode will search within a collection of documents composed
+            by title and the actual content.
 
         top_k: `int`
             number of retrieved documents per query
@@ -65,4 +68,13 @@ class Calculator:
     """Simple calculator implementation with built-in `eval` function"""
 
     def calculate(self, expression: str) -> int | float:
-        return eval(expression)
+        """
+        evaluate the expression returning the result. A preliminary check on the
+        validity of the expression is made and will result in an `ValueError`
+        exception if not satisfied.
+        """
+        if not re.fullmatch(r"[0-9+*/.()\s-]+", expression, flags=re.ASCII):
+            raise ValueError(
+                "Only numbers, arithmetic operators, and parentheses are allowed"
+            )
+        return eval(expression, {"__builtins__": {}})
