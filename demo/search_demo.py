@@ -14,9 +14,16 @@ if __name__ == "__main__":
         default=3,
         help="number of retrieved documents for each query",
     )
+    parser.add_argument(
+        "--by",
+        type=str,
+        default="document",
+        choices=["title", "document"],
+        help="choose how to perform the retrieval",
+    )
     args = parser.parse_args()
 
-    se = SearchEngine(search_by="title", top_k=args.k)
+    se = SearchEngine(search_by=args.by, top_k=args.k)
 
     while True:
         try:

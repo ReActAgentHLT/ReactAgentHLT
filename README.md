@@ -38,5 +38,5 @@ tools, agents and models available.
 
 ```bash
 # will lunch an interactive version of the search engine
-python demo/search_demo.py
+python demo/search_demo.py --k=3 --by=document
 ```
