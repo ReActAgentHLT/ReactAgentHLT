@@ -30,3 +30,13 @@ All the modules will be available through the `reactagenthlt` package:
 from reactagenthlt.agents import ReActAgent
 from reactagenthlt.tools import SearchEngine
 ```
+
+## Demo
+
+In the `demo` folder there are some _live demo_ scripts to try some of the
+tools, agents and models available.
+
+```bash
+# will lunch an interactive version of the search engine
+python demo/search_demo.py
+```
