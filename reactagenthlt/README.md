@@ -83,6 +83,12 @@ results = se.search("doctor strange")
 print(results["document"].iloc[0]) # will print the first retrieved document
 ```
 
+#### Future Updates
+
+From the same exact interface should be possible in future to have an additional
+parameter like `retrieval_type` that can be `"sparse"` or `"dense"` but for now
+the only sparse version based in BM25 is available.
+
 ### Calculator
 
 The `Calculator` class is based on the Python built-in `eval` function that
