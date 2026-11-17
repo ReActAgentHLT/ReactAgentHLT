@@ -47,9 +47,8 @@ class SearchEngine:
         self.tokenizer = RetrievalTokenizer()
         self.top_k = top_k
 
-        self.retriever = rank_bm25.BM25Okapi(
-            self.tokenizer.tokenize_corpus(self.corpus[search_by])
-        )
+        tokenized_corpus = self.tokenizer.tokenize_corpus(self.corpus[search_by])
+        self.retriever = rank_bm25.BM25Okapi(tokenized_corpus)
 
     def search(self, query: str) -> pd.DataFrame:
         """

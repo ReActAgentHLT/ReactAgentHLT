@@ -16,7 +16,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    se = SearchEngine(search_by="document", top_k=args.k)
+    se = SearchEngine(search_by="title", top_k=args.k)
 
     while True:
         try:
@@ -26,7 +26,7 @@ if __name__ == "__main__":
             end = time.perf_counter()
 
             titles = results["title"].to_list()
-            contents = results["document"].to_list()
+            contents = results["content"].to_list()
 
             for i, (title, content) in enumerate(zip(titles, contents)):
                 print(f"{Fore.GREEN}{i + 1}. {title}{Fore.RESET}")

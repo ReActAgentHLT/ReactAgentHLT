@@ -103,20 +103,23 @@ def hotpotqa_corpus() -> pd.DataFrame:
         load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas(),
     )
 
-    out = {"title": [], "document": []}
+    out = {"title": [], "content": [], "document": []}
     for context in tqdm(ds["context"], desc="building corpus", ncols=80):
         titles = context["title"]  # list of titles
         sentences = context["sentences"]  # list of lists of paragraphs
 
         for title, paragraphs in zip(titles, sentences):
-            document = ""
+            content = ""
             for paragraph in paragraphs:
                 # some paragraphs begins with a whitespace -> remove
-                document += paragraph.removeprefix(" ") + "\n"
+                content += paragraph.removeprefix(" ") + "\n"
 
             out["title"].append(title)
-            out["document"].append(document)
+            out["content"].append(content)
+            out["document"].append(title + "\n\n" + content)
 
     df = pd.DataFrame(out)
 
-    return df.drop_duplicates(subset=["title", "document"]).reset_index(drop=True)
+    return df.drop_duplicates(subset=["title", "content", "document"]).reset_index(
+        drop=True
+    )
