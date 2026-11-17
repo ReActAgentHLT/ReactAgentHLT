@@ -1,6 +1,12 @@
 import unittest
+from unittest.mock import Mock
+import pandas as pd
 
-from reactagenthlt.controller import parse_action, execute_calculation
+from reactagenthlt.controller import (
+    parse_action,
+    execute_calculation,
+    execute_search,
+)
 
 
 class TestActionParser(unittest.TestCase):
@@ -104,6 +110,72 @@ class TestCalculatorExecution(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             execute_calculation("2 ** 10")
+
+
+
+class TestSearchExecution(unittest.TestCase):
+    """
+    Test the integration between the ReAct controller and SearchEngine.
+
+    These tests use a mock search engine to simulate search results.
+    This allows us to check the controller without loading a dataset
+    or changing Federico's original SearchEngine implementation.
+    """
+
+    def test_search_returns_documents(self):
+        """
+        Check that the controller converts retrieved documents
+        into a single text observation for the language model.
+        """
+
+        # Create a mock search engine with predefined results.
+        search_engine = Mock()
+
+        search_engine.search.return_value = pd.DataFrame({
+            "document": [
+                "Apple Remote controls Front Row.",
+                "Front Row can also be controlled by a keyboard.",
+            ]
+        })
+
+        # Execute the search through our controller function.
+        result = execute_search("Front Row", search_engine)
+
+        # Check that the search engine received the correct query.
+        search_engine.search.assert_called_once_with("Front Row")
+
+        # Check that both retrieved documents appear in the observation.
+        self.assertIn("Apple Remote controls Front Row.", result)
+        self.assertIn("Front Row can also be controlled by a keyboard.", result)
+
+    def test_empty_search_query(self):
+        """
+        Check that an empty search query is rejected
+        before calling the search engine.
+        """
+
+        search_engine = Mock()
+
+        with self.assertRaises(ValueError):
+            execute_search("   ", search_engine)
+
+        # The search tool should not be called for invalid input.
+        search_engine.search.assert_not_called()
+
+    def test_no_search_results(self):
+        """
+        Check that the controller returns a clear observation
+        when the search engine finds no documents.
+        """
+
+        search_engine = Mock()
+        search_engine.search.return_value = pd.DataFrame(
+            columns=["document"]
+        )
+
+        result = execute_search("Unknown topic", search_engine)
+
+        self.assertEqual(result, "No documents found.")
 
 
 
