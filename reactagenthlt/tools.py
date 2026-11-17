@@ -76,8 +76,8 @@ class Calculator:
         validity of the expression is made and will result in an `ValueError`
         exception if not satisfied.
         """
-        pattern = re.compile(r"[0-9+*/.()\s-]+")
-        if not re.fullmatch(pattern, expression, flags=re.ASCII):
+        pattern = re.compile(r"[0-9+*/.()\s-]+", flags=re.ASCII)
+        if not pattern.fullmatch(expression):
             raise ValueError(
                 "Only numbers, arithmetic operators, and parentheses are allowed"
             )
