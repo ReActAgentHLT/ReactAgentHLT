@@ -57,6 +57,9 @@ class SearchEngine:
         """
         Retrieve the `top_k` results for the given query
         """
+        if not query.strip():
+            raise ValueError("Search query cannot be empty")
+
         scores = self.retriever.get_scores(self.tokenizer.tokenize(query))
         indices = np.argsort(scores)[::-1][: self.top_k]
 
@@ -73,8 +76,10 @@ class Calculator:
         validity of the expression is made and will result in an `ValueError`
         exception if not satisfied.
         """
-        if not re.fullmatch(r"[0-9+*/.()\s-]+", expression, flags=re.ASCII):
+        pattern = re.compile(r"[0-9+*/.()\s-]+")
+        if not re.fullmatch(pattern, expression, flags=re.ASCII):
             raise ValueError(
                 "Only numbers, arithmetic operators, and parentheses are allowed"
             )
+
         return eval(expression, {"__builtins__": {}})
