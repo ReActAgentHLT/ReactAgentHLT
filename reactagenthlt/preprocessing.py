@@ -5,7 +5,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 
 
-def hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFrame:
+def load_hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFrame:
     """
     Fetch HotPotQA dataset from HuggingFace and returns it as a `pandas`
     `DataFrame`
@@ -34,7 +34,7 @@ def hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFrame:
     return ds[["question", "answer"]]
 
 
-def gsm8k(
+def load_gsm8k(
     setting: str = "main",
     train: bool = False,
     reasoning: bool = False,
