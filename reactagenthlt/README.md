@@ -106,3 +106,129 @@ calculator = Calculator()
 result = calculator.calculate("3 + 1")
 print(result) # should be 4 (I guess...)
 ```
+
+
+
+
+## ReAct Controller
+
+The ReAct Controller is implemented in `controller.py`. It manages the interaction between a language model and the existing SearchEngine and Calculator tools.
+
+The controller follows the ReAct workflow:
+
+**Thought → Action → Observation → Repeat → Finish**
+
+At each step, the controller receives text from the language model, extracts an action, executes the corresponding tool, and adds the resulting observation to the context.
+
+The loop continues until the model produces a final answer or the maximum number of steps is reached.
+
+### Supported Actions
+
+The controller supports three actions:
+
+| Action | Description |
+|---|---|
+| `Search[query]` | Retrieve relevant documents using SearchEngine. |
+| `Calculate[expression]` | Evaluate a supported arithmetic expression using Calculator. |
+| `Finish[answer]` | Stop the loop and return the final answer. |
+
+A model response must contain exactly one valid `Action:` line.
+
+For example:
+
+```text
+Thought: I need to calculate the sum.
+Action: Calculate[15 + 18]
+```
+
+### How to Use
+
+Import the `run_react()` function:
+
+```python
+from reactagenthlt.controller import run_react
+```
+
+The controller receives:
+
+- `question`: The question to answer.
+- `generate`: A callable that receives the current context and returns a model-generated string.
+- `search_engine`: An optional initialized SearchEngine instance.
+- `max_steps`: Maximum number of model calls (default: 7).
+
+The `generate` callable allows different language models to be connected without changing the controller.
+
+#### Example: Calculator
+
+The following example uses predefined model responses to demonstrate the complete ReAct loop without loading a language model.
+
+```python
+from reactagenthlt.controller import run_react
+
+responses = iter([
+    "Thought: I should calculate the sum.\nAction: Calculate[15 + 18]",
+    "Thought: The result is 33.\nAction: Finish[33]",
+])
+
+def generate(context: str) -> str:
+    return next(responses)
+
+answer = run_react(
+    question="What is 15 + 18?",
+    generate=generate,
+)
+
+print(answer)
+```
+
+Expected output:
+
+```text
+33
+```
+
+#### Example: Search Engine Integration
+
+The controller can use the existing BM25-based SearchEngine:
+
+```python
+from reactagenthlt.tools import SearchEngine
+from reactagenthlt.controller import run_react
+
+search_engine = SearchEngine(
+    search_by="document",
+    top_k=3,
+)
+```
+
+Pass this initialized instance through the `search_engine` parameter when calling `run_react()`.
+
+The controller handles `Search[query]` actions and adds the retrieved documents to the context as observations.
+
+The SearchEngine loads the HotpotQA-based corpus and builds its retrieval index during initialization.
+
+### Error Handling
+
+The controller includes basic input validation and error handling.
+
+- Invalid action formats raise `ValueError`.
+- Empty questions are rejected.
+- Expected tool `ValueError` exceptions are returned as error observations.
+- Search actions require an initialized SearchEngine.
+- The agent raises `RuntimeError` if the maximum number of steps is reached without a `Finish` action.
+
+### Testing
+
+Tests are implemented in `test/test_controller.py` using Python's `unittest` framework.
+
+Run the controller tests from the repository root:
+
+```bash
+python -m unittest discover -s test -p "test_controller.py" -v
+```
+
+The current implementation has **19 passing tests**, covering action parsing, tool integration, the ReAct loop, context updates, stopping conditions, and error handling.
+
+Integration with the actual SearchEngine has also been tested successfully using predefined model responses.
+
+**Note:** These tests do not yet verify end-to-end reasoning with a real language model. Model integration and benchmark evaluation are separate project tasks.
