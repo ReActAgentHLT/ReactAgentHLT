@@ -9,6 +9,13 @@ from reactagenthlt.tools import SearchEngine
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--kind",
+        type=str,
+        default="sparse",
+        choices=["sparse", "dense"],
+        help="choose between sparse and dense retrieval",
+    )
+    parser.add_argument(
         "--k",
         type=int,
         default=3,
@@ -23,7 +30,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    se = SearchEngine(search_by=args.by, top_k=args.k)
+    se = SearchEngine(kind=args.kind, search_by=args.by, top_k=args.k)
 
     while True:
         try:
