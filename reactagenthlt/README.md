@@ -59,16 +59,17 @@ A copy of the title is also stored separately for other purposes (see later).
 
 ---
 
-The only parameters are `search_by` and `top_k`:
+The parameters are `kind`, `search_by` and `top_k`:
 
+- `kind`: `"sparse"` (the default, BM25) or `"dense"` (Sentence Transformers).
 - `search_by` can have `"title"` or `"document"` as allowed values. The first
   will search within a corpus of titles only while the second within a corpus of
   documents composed by one string that includes both title and content of the
   document.
 - `top_k`: the number of documents to be returned.
 
-The only method is `search` that accepts a string as a query (the query will be
-tokenized internally) and returns a `DataFrame` with 3 columns and `top_k` rows.
+The `search` method accepts a string query and returns a `DataFrame` with
+3 columns and up to `top_k` rows.
 For each row the records are the title, the content and whole document (title +
 content concatenated in one string).
 
@@ -77,17 +78,17 @@ content concatenated in one string).
 | "Doctor Strange" | "Doctor Strange is a movie..." | "Doctor Strange ... Doctor Strange is a movie..." |
 
 ```python
-se = SearchEngine(search_by="document", top_k=3)
+se = SearchEngine(kind="sparse", search_by="document", top_k=3)
 results = se.search("doctor strange")
 
 print(results["document"].iloc[0]) # will print the first retrieved document
 ```
 
-#### Future Updates
-
-From the same exact interface should be possible in future to have an additional
-parameter like `retrieval_type` that can be `"sparse"` or `"dense"` but for now
-the only sparse version based in BM25 is available.
+Dense retrieval uses `sentence-transformers/all-MiniLM-L6-v2`. The model is
+cached by Hugging Face; corpus embeddings are saved in `.search_embeddings/` at
+the project root and reused when the model name, search mode, and ordered
+corpus match. Delete that directory to force re-encoding, for example after
+updating the model weights.
 
 ### Calculator
 
@@ -107,9 +108,6 @@ result = calculator.calculate("3 + 1")
 print(result) # should be 4 (I guess...)
 ```
 
-
-
-
 ## ReAct Controller
 
 The ReAct Controller is implemented in `controller.py`. It manages the interaction between a language model and the existing SearchEngine and Calculator tools.
@@ -126,11 +124,11 @@ The loop continues until the model produces a final answer or the maximum number
 
 The controller supports three actions:
 
-| Action | Description |
-|---|---|
-| `Search[query]` | Retrieve relevant documents using SearchEngine. |
+| Action                  | Description                                                  |
+| ----------------------- | ------------------------------------------------------------ |
+| `Search[query]`         | Retrieve relevant documents using SearchEngine.              |
 | `Calculate[expression]` | Evaluate a supported arithmetic expression using Calculator. |
-| `Finish[answer]` | Stop the loop and return the final answer. |
+| `Finish[answer]`        | Stop the loop and return the final answer.                   |
 
 A model response must contain exactly one valid `Action:` line.
 
@@ -189,16 +187,20 @@ Expected output:
 
 #### Example: Search Engine Integration
 
-The controller can use the existing BM25-based SearchEngine:
+The controller accepts either retrieval mode through the same SearchEngine interface:
 
 ```python
 from reactagenthlt.tools import SearchEngine
 from reactagenthlt.controller import run_react
 
 search_engine = SearchEngine(
+    kind="dense",  # Use "sparse" for BM25.
     search_by="document",
     top_k=3,
 )
+
+# Supply your own generate(context) function for the language model.
+answer = run_react("Your question", generate, search_engine=search_engine)
 ```
 
 Pass this initialized instance through the `search_engine` parameter when calling `run_react()`.

@@ -5,7 +5,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
 
 from reactagenthlt.preprocessing import hotpotqa_corpus
 
@@ -74,6 +73,8 @@ class SearchEngine:
             tokenized_corpus = self.tokenizer.tokenize_corpus(self.corpus[search_by])
             self.retriever = BM25Okapi(tokenized_corpus)
         else:
+            from sentence_transformers import SentenceTransformer
+
             model_name = "sentence-transformers/all-MiniLM-L6-v2"
             self.model = SentenceTransformer(model_name)
             documents = self.corpus[search_by].tolist()
