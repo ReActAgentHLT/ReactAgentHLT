@@ -28,19 +28,27 @@ class FakeSentenceTransformer:
 
 class TestDenseControllerIntegration(unittest.TestCase):
     def test_dense_search_observation_and_cache(self):
-        corpus = pd.DataFrame({
-            "title": ["Apple", "River"],
-            "content": ["A fruit.", "Water flows."],
-            "document": ["Apple\n\nA fruit.", "River\n\nWater flows."],
-        })
+        corpus = pd.DataFrame(
+            {
+                "title": ["Apple", "River"],
+                "content": ["A fruit.", "Water flows."],
+                "document": ["Apple\n\nA fruit.", "River\n\nWater flows."],
+            }
+        )
         FakeSentenceTransformer.document_encodings = 0
         with (
             tempfile.TemporaryDirectory() as temp_dir,
-            patch("reactagenthlt.tools.__file__", str(Path(temp_dir) / "pkg" / "tools.py")),
-            patch("reactagenthlt.tools.hotpotqa_corpus", return_value=corpus),
-            patch.dict("sys.modules", {"sentence_transformers": SimpleNamespace(
-                SentenceTransformer=FakeSentenceTransformer
-            )}),
+            patch(
+                "reactagenthlt.tools.__file__", str(Path(temp_dir) / "pkg" / "tools.py")
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "sentence_transformers": SimpleNamespace(
+                        SentenceTransformer=FakeSentenceTransformer
+                    )
+                },
+            ),
         ):
             engine = SearchEngine(kind="dense", top_k=1)
             # A second engine should load the saved document embeddings.

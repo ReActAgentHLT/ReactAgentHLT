@@ -33,6 +33,7 @@ class Agent:
         do_sample: bool = False,
         stream: bool = False,
     ) -> Response:
+        # append the user input to the history
         self.history.append(
             {
                 "role": "user",
@@ -47,6 +48,14 @@ class Agent:
             stream=stream,
         )
         end = time.perf_counter()
+
+        # append the agent response to the history
+        self.history.append(
+            {
+                "role": "assistant",
+                "content": output,
+            }
+        )
 
         return Response(
             output=output,
@@ -77,7 +86,7 @@ if __name__ == "__main__":
 
             print()
             print(f"input tokens: {response.token_usage.input_tokens}")
-            print(f"output tokens: {response.token_usage.input_tokens}")
+            print(f"output tokens: {response.token_usage.output_tokens}")
             print(f"generation time: {response.generation_time}")
             print("=" * 50)
         except EOFError:

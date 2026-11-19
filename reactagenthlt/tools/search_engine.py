@@ -5,11 +5,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from rank_bm25 import BM25Okapi
+from sentence_transformers import SentenceTransformer
 
 from reactagenthlt.preprocessing import hotpotqa_corpus
 
 
-# ======== RETRIEVAL ========
 class RetrievalTokenizer:
     """
     Simple regex-based tokenizer for the `SearchEngine` class
@@ -73,8 +73,6 @@ class SearchEngine:
             tokenized_corpus = self.tokenizer.tokenize_corpus(self.corpus[search_by])
             self.retriever = BM25Okapi(tokenized_corpus)
         else:
-            from sentence_transformers import SentenceTransformer
-
             model_name = "sentence-transformers/all-MiniLM-L6-v2"
             self.model = SentenceTransformer(model_name)
             documents = self.corpus[search_by].tolist()
@@ -117,20 +115,56 @@ class SearchEngine:
         return self.corpus.iloc[indices]
 
 
-# ======== MATH CALCULATOR ========
-class Calculator:
-    """Simple calculator implementation with built-in `eval` function"""
+if __name__ == "__main__":
+    import argparse
+    import time
 
-    def calculate(self, expression: str) -> int | float:
-        """
-        evaluate the expression returning the result. A preliminary check on the
-        validity of the expression is made and will result in an `ValueError`
-        exception if not satisfied.
-        """
-        pattern = re.compile(r"[0-9+*/.()\s-]+", flags=re.ASCII)
-        if not pattern.fullmatch(expression):
-            raise ValueError(
-                "Only numbers, arithmetic operators, and parentheses are allowed"
+    import numpy as np
+    from colorama import Fore
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--kind",
+        type=str,
+        default="sparse",
+        choices=["sparse", "dense"],
+        help="choose between sparse and dense retrieval",
+    )
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=3,
+        help="number of retrieved documents for each query",
+    )
+    parser.add_argument(
+        "--by",
+        type=str,
+        default="document",
+        choices=["title", "document"],
+        help="choose how to perform the retrieval",
+    )
+    args = parser.parse_args()
+
+    se = SearchEngine(kind=args.kind, search_by=args.by, top_k=args.k)
+
+    while True:
+        try:
+            query = input(f"{Fore.YELLOW}search{Fore.RESET}: ")
+            start = time.perf_counter()
+            results = se.search(query)
+            end = time.perf_counter()
+
+            titles = results["title"].to_list()
+            contents = results["content"].to_list()
+
+            for i, (title, content) in enumerate(zip(titles, contents)):
+                print(f"{Fore.GREEN}{i + 1}. {title}{Fore.RESET}")
+                print(content)
+
+            print(
+                f"{Fore.LIGHTBLACK_EX}"
+                + f"--- search time: {end - start:.2f} seconds ---"
+                + f"{Fore.RESET}"
             )
-
-        return eval(expression, {"__builtins__": {}})
+        except EOFError:
+            break
