@@ -13,8 +13,13 @@ class Response:
 
 
 class Agent:
-    def __init__(self, configpath: str) -> None:
-        self.language_model = LanguageModel(configpath)
+    def __init__(
+        self,
+        configpath: str,
+        do_sample: bool = False,
+        stream: bool = False,
+    ) -> None:
+        self.language_model = LanguageModel(configpath, do_sample, stream)
 
         self.system_prompts = []
         self.history = []
@@ -27,12 +32,7 @@ class Agent:
             }
         )
 
-    def ask(
-        self,
-        prompt: str,
-        do_sample: bool = False,
-        stream: bool = False,
-    ) -> Response:
+    def ask(self, prompt: str) -> Response:
         # append the user input to the history
         self.history.append(
             {
@@ -43,9 +43,7 @@ class Agent:
 
         start = time.perf_counter()
         output, token_usage = self.language_model.generate(
-            messages=self.system_prompts + self.history,
-            do_sample=do_sample,
-            stream=stream,
+            messages=self.system_prompts + self.history
         )
         end = time.perf_counter()
 
@@ -76,18 +74,18 @@ if __name__ == "__main__":
     parser.add_argument("--stream", action="store_true", help="enable chat streaming")
     args = parser.parse_args()
 
-    agent = Agent(configpath=args.config)
+    agent = Agent(configpath=args.config, do_sample=args.sample, stream=args.stream)
     agent.add_system_prompt("your name is Mario and you are an helpful assistant")
     while True:
         try:
             prompt = input("user: ")
             print("agent: ", end="")
-            response = agent.ask(prompt, do_sample=args.sample, stream=args.stream)
+            response = agent.ask(prompt)
 
             print()
             print(f"input tokens: {response.token_usage.input_tokens}")
             print(f"output tokens: {response.token_usage.output_tokens}")
-            print(f"generation time: {response.generation_time}")
+            print(f"generation time: {response.generation_time:.2f} seconds")
             print("=" * 50)
         except EOFError:
             break

@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import asdict, dataclass
 from typing import cast
 
@@ -7,6 +8,8 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BatchEncoding,
+    StoppingCriteria,
+    StoppingCriteriaList,
     TextStreamer,
     TokenizersBackend,
 )
@@ -18,8 +21,26 @@ class TokenUsage:
     output_tokens: int
 
 
+class RegexStop(StoppingCriteria):
+    def __init__(self, tokenizer, pattern, prompt_length):
+        self.tokenizer = tokenizer
+        self.regex = re.compile(pattern)
+        self.prompt_length = prompt_length
+
+    def __call__(self, input_ids, scores, **kwargs):
+        generated = input_ids[0, self.prompt_length :]
+        text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        return bool(self.regex.search(text))
+
+
 class LanguageModel:
-    def __init__(self, configpath: str) -> None:
+    def __init__(
+        self,
+        configpath: str,
+        do_sample: bool = False,
+        stream: bool = False,
+        stop_criterias: list[str] = [],
+    ) -> None:
         with open(configpath, "r") as configfile:
             config = json.load(configfile)
 
@@ -32,13 +53,12 @@ class LanguageModel:
         )
         self.model.eval()
 
+        self.do_sample = do_sample
+        self.stream = stream
+        self.stop_criterias = stop_criterias
+
     @torch.inference_mode()
-    def generate(
-        self,
-        messages: list[dict[str, str]],
-        do_sample: bool = False,
-        stream: bool = False,
-    ) -> tuple[str, TokenUsage]:
+    def generate(self, messages: list[dict[str, str]]) -> tuple[str, TokenUsage]:
 
         # tokenize the input
         inputs = cast(
@@ -58,16 +78,27 @@ class LanguageModel:
         # used for live demo in order to generate tokens interactively
         streamer = (
             TextStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-            if stream
+            if self.stream
             else None
+        )
+
+        # generate list of generation stopping criteria if some regex is encountered
+        criteria = StoppingCriteriaList(
+            [
+                RegexStop(self.tokenizer, regex, inputs["input_ids"].shape[1])
+                for regex in self.stop_criterias
+            ]
         )
 
         outputs = self.model.generate(
             **inputs,
             max_new_tokens=self.config["max_new_tokens"],
-            do_sample=do_sample,
+            do_sample=self.do_sample,
+            stopping_criteria=criteria,
             streamer=streamer,
-            **self.config["sampling"] if do_sample else dict(),  # generation parameters
+            **self.config["sampling"]
+            if self.do_sample
+            else dict(),  # generation parameters
         )
 
         generated = outputs[0][input_tokens:]  # get only output tokens
