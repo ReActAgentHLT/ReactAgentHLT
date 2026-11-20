@@ -1,6 +1,6 @@
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import cast
 
 import torch
@@ -43,23 +43,11 @@ class LanguageModel:
     Wrapper around HuggingFace transfomers API for causal text generation.
     """
 
-    def __init__(
-        self,
-        configpath: str,
-        do_sample: bool = False,
-        stream: bool = False,
-        stop_criterias: list[str] = [],
-    ) -> None:
-        """
+    def __init__(self, configpath: str) -> None:
+        """Load the model and tokenizer described by a JSON config file.
+
         Args:
-            configpath: path to the config file of the model
-
-            do_sample: enables text generation using sampling config in the
-            config file stream
-
-            stream: enables generated text to appear on stdout token by token
-
-            stop_criterias: list of regex to force the generation to stop
+            configpath: Path to the model configuration file.
         """
         with open(configpath, "r") as configfile:
             config = json.load(configfile)
@@ -73,19 +61,24 @@ class LanguageModel:
         )
         self.model.eval()
 
-        self.do_sample = do_sample
-        self.stream = stream
-        self.stop_criterias = stop_criterias
-
     @torch.inference_mode()
-    def generate(self, messages: list[dict[str, str]]) -> tuple[str, TokenUsage]:
+    def generate(
+        self,
+        messages: list[dict[str, str]],
+        do_sample: bool = False,
+        stream: bool = False,
+        stop_criteria: tuple[str, ...] = (),
+    ) -> tuple[str, TokenUsage]:
         """
         Args:
-            messages: list of chat templates
+            messages: Chat messages containing role and content fields.
+            do_sample: Use the sampling parameters from the model config.
+            stream: Print generated tokens to stdout as they are produced.
+            stop_criteria: Regex patterns that stop generation when matched.
+                The matched text remains in the generated output.
 
         Returns:
-            A tuple containing the output generated string and the relative
-            token usage for the given messages.
+            Generated text and token usage for this model call.
         """
 
         # tokenize the input
@@ -106,7 +99,7 @@ class LanguageModel:
         # used for live demo in order to generate tokens interactively
         streamer = (
             TextStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-            if self.stream
+            if stream
             else None
         )
 
@@ -114,19 +107,17 @@ class LanguageModel:
         criteria = StoppingCriteriaList(
             [
                 RegexStop(self.tokenizer, regex, inputs["input_ids"].shape[1])
-                for regex in self.stop_criterias
+                for regex in stop_criteria
             ]
         )
 
         outputs = self.model.generate(
             **inputs,
             max_new_tokens=self.config["max_new_tokens"],
-            do_sample=self.do_sample,
+            do_sample=do_sample,
             stopping_criteria=criteria,
             streamer=streamer,
-            **self.config["sampling"]
-            if self.do_sample
-            else dict(),  # generation parameters
+            **self.config["sampling"] if do_sample else dict(),  # generation parameters
         )
 
         generated = outputs[0][input_tokens:]  # get only output tokens

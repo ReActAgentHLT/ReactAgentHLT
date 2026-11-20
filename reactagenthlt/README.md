@@ -1,5 +1,60 @@
 # Documentation
 
+## Agents
+
+The `agents` package separates model generation from agent behavior:
+
+- `LanguageModel` loads a Hugging Face model once and exposes `generate()`.
+- `BaseAgent` defines `ask()` and provides shared conversation state,
+  `add_system_prompt()`, and `clear_ctx()`.
+- `Agent` (in `agents/standard.py`) performs one generation per request.
+- `ReActAgent` (in `agents/react.py`) is currently a scaffold: its `ask()`
+  performs one generation, not the ReAct loop. For a working ReAct loop,
+  use `controller.run_react()` below.
+
+Agents receive an existing `LanguageModel` rather than a configuration path:
+
+```python
+from reactagenthlt.agents import Agent, LanguageModel, ReActAgent
+from reactagenthlt.tools import Calculator, SearchEngine
+
+model = LanguageModel("path/to/model-config.json")
+agent = Agent(model)
+agent.add_system_prompt("You are a helpful assistant.")
+response = agent.ask("Hello!", do_sample=False, stream=False)
+print(response.output)
+print(response.token_usage)
+print(response.generation_time)
+agent.clear_ctx()  # Keeps system prompts and model configuration.
+
+# The same model can be shared; each agent has its own conversation history.
+react_agent = ReActAgent(
+    model,
+    search_engine=SearchEngine(kind="sparse", search_by="document", top_k=2),
+    calculator=Calculator(),
+    max_steps=7,
+)
+```
+
+`search_engine` is optional and defaults to `None`; the calculator defaults to
+an independent `Calculator` instance when omitted. `max_steps` must be positive
+and is reserved for the future ReAct loop; it does not yet affect `ask()`.
+Tools are stored on explicit `search_engine` and `calculator` attributes.
+
+Sampling and streaming are per-request options on `ask()`. For direct model
+calls, `LanguageModel.generate()` also accepts `stop_criteria`, a tuple of regex
+patterns. Matching text is retained in the output.
+
+The standard agent's `Response` contains the generated `output`, `token_usage`,
+and `generation_time` in seconds for the model call. The ReAct scaffold currently
+uses the same single-call metrics.
+
+Run the interactive standard agent from the repository root:
+
+```bash
+python -m reactagenthlt.agents.standard path/to/model-config.json --sample --stream
+```
+
 ## Preprocessing
 
 For the dataset preprocessing needed for agents evaluation and search engine
