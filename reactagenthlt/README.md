@@ -232,3 +232,18 @@ The current implementation has **19 passing tests**, covering action parsing, to
 Integration with the actual SearchEngine has also been tested successfully using predefined model responses.
 
 **Note:** These tests do not yet verify end-to-end reasoning with a real language model. Model integration and benchmark evaluation are separate project tasks.
+
+### Evaluation Features
+
+The controller supports:
+
+- Strict evaluation using `strict=True`.
+- Search query normalization compatible with RetrievalTokenizer.
+- Dataset-specific limits: 7 steps for HotpotQA and 9 for GSM8K.
+- Structured exceptions for invalid actions, tool failures, and budget exhaustion.
+- Optional execution tracing through the `trace` parameter.
+- Independent command-format diagnostics and error statistics.
+
+These features support consistent evaluation of ReAct and Focused ReAct.
+
+End-to-end integration with the real language model remains to be verified.
