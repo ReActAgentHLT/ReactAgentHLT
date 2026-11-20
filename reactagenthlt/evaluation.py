@@ -1,149 +1,166 @@
-"""Score completed runs and inspect invalid replies after the experiment."""
+"""Run an agent over a dataset and collect per-question metrics in a DataFrame."""
 
 import re
 import string
 from collections import Counter
-from collections.abc import Iterable
 from decimal import Decimal
 
-from reactagenthlt.agents.react import BASELINES, RunResult
-from reactagenthlt.preprocessing import GSM8K_NUMBER
+import pandas as pd
+from tqdm import tqdm
+
+from reactagenthlt.agents import LanguageModel, ReActAgent
+from reactagenthlt.agents.react import RunResult
+from reactagenthlt.preprocessing import hotpotqa_supporting_documents, load_gsm8k, load_hotpotqa
+from reactagenthlt.tools import SearchEngine
 
 
-FORMAT_FAILURES = {"missing_action", "malformed_action", "multiple_actions"}
-INVALID_REPLIES = FORMAT_FAILURES | {
-    "unsupported_action", "invalid_tool_input", "invalid_final_answer"
+# Replies that end the run because the action is missing or invalid
+# (bad syntax, unknown action, invalid tool input or placeholder answer).
+FAILED_ACTIONS = {
+    "missing_action", "malformed_action", "multiple_actions",
+    "unsupported_action", "invalid_tool_input", "invalid_final_answer",
 }
-INFRASTRUCTURE_FAILURES = {"model_error", "tool_error"}
-LOOSE_COMMAND = re.compile(
-    r"(?:(action)\s*(:?)\s*)?(search|calculate|finish)\b\s*([\[(]?)(.*)", re.I
-)
+CONFIG = ["model", "dataset", "mode", "k", "budget"]
+NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+THOUSANDS_COMMA = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 
 
-def _format_deviations(text: str, mode: str) -> set[str]:
-    """Recognize deviations in command-like lines for reporting only."""
-    categories = set()
-    commands = 0
-    needs_prefix = mode not in BASELINES
-    for line in text.splitlines():
-        line = line.strip()
-        command = line.strip("`*").strip()
-        command = re.sub(r"^[-*]\s+", "", command)
-        match = LOOSE_COMMAND.fullmatch(command)
-        if not match or not (match[1] or match[4]):
-            continue
-
-        commands += 1
-        prefix, colon, name, opening, remainder = match.groups()
-        if command != line or text.strip().startswith("```"):
-            categories.add("markdown_wrapper")
-        if needs_prefix and not prefix:
-            categories.add("missing_action_prefix")
-        elif not needs_prefix and prefix:
-            categories.add("unexpected_action_prefix")
-        elif prefix and not colon:
-            categories.add("missing_colon")
-        if (prefix and prefix != "Action") or name != name.capitalize():
-            categories.add("capitalization")
-        if opening == "[" and bool(prefix) == needs_prefix and (not prefix or colon):
-            canonical = f"{'Action: ' if needs_prefix else ''}{name}["
-            if command[:match.end(4)].lower() != canonical.lower():
-                categories.add("spacing")
-
-        if not opening:
-            categories.add("missing_opening_bracket")
-        elif opening == "(":
-            categories.add("parentheses_instead_of_brackets")
-        else:
-            argument, closing, trailing = remainder.rpartition("]")
-            if not closing:
-                categories.add("missing_closing_bracket")
-            elif not argument.strip():
-                categories.add("empty_argument")
-            if closing and trailing.strip():
-                categories.add("trailing_text")
-
-    if commands > 1:
-        categories.add("multiple_commands")
-    if commands and not categories:
-        categories.add("unexpected_text")
-    return categories
-
-
-def diagnose_formats(results: Iterable[RunResult]) -> dict:
-    """Count deviations by type and count each affected model call once."""
-    counts = Counter()
-    affected_calls = 0
-    for result in results:
-        if result.termination not in INVALID_REPLIES or not result.steps:
-            continue
-        text = result.steps[-1].raw_output or ""
-        categories = _format_deviations(text, result.mode)
-        if result.termination not in FORMAT_FAILURES:
-            categories &= {"empty_argument", "capitalization"}
-        if categories:
-            counts.update(categories)
-            affected_calls += 1
-    return {"affected_calls": affected_calls, "categories": dict(sorted(counts.items()))}
-
-
-def summarize_run(result: RunResult, supporting_documents: set[str] | None = None) -> dict:
-    """Collect the counts and times for one result, including failed runs."""
-    tokens = result.token_usage
-    summary = {
-        "termination": result.termination,
-        "model_calls": len(result.steps),
-        "ordinary_calls": sum(not step.forced for step in result.steps),
-        "tool_calls": sum(step.tool_called for step in result.steps),
-        "prompt_tokens": tokens.input_tokens,
-        "completion_tokens": tokens.output_tokens,
-        "generation_seconds": result.generation_time,
-        "elapsed_seconds": result.elapsed_seconds,
-        "invalid_reply_calls": int(result.termination in INVALID_REPLIES),
-        "repeated_actions": sum(step.repeated for step in result.steps),
-        "early_stop_triggered": any(step.forced for step in result.steps),
-        "budget_exhausted": result.termination == "budget_exhausted",
-        "calculator_calls": sum(
-            step.action == "Calculate" and step.tool_called for step in result.steps
-        ),
-        "invalid_calculations": int(
-            result.termination == "invalid_tool_input"
-            and result.steps[-1].action == "Calculate"
-        ),
-    }
-    if supporting_documents is not None:
-        retrieved = {document for step in result.steps for document in step.documents}
-        summary["supporting_paragraphs_retrieved"] = len(retrieved & supporting_documents)
-        summary["all_supporting_paragraphs_retrieved"] = bool(supporting_documents) and (
-            supporting_documents <= retrieved
-        )
-    return summary
+# Answer scoring
 
 
 def _normalize_hotpotqa(answer: str) -> str:
-    """Use HotpotQA's official answer normalization rules."""
+    """HotpotQA's official normalization: lowercase, no punctuation or articles."""
     cleaned = answer.lower().translate(str.maketrans("", "", string.punctuation))
     return " ".join(re.sub(r"\b(a|an|the)\b", " ", cleaned).split())
 
 
-def score_answer(result: RunResult, reference: str) -> dict[str, float] | None:
-    """Score a prediction, with None reserved for infrastructure failures."""
-    if result.termination in INFRASTRUCTURE_FAILURES:
-        return None
-    if result.task == "gsm8k":
-        answer = (result.answer or "").strip()
-        correct = bool(re.fullmatch(GSM8K_NUMBER, answer)) and (
-            Decimal(answer.replace(",", "")) == Decimal(reference.replace(",", ""))
+def hotpotqa_scores(prediction: str | None, gold: str) -> dict[str, float]:
+    """EM, precision, recall and F1 as in the official HotpotQA evaluation."""
+    pred, ref = _normalize_hotpotqa(prediction or ""), _normalize_hotpotqa(gold)
+    scores = {"em": float(pred == ref), "precision": 0.0, "recall": 0.0, "f1": 0.0}
+    if pred != ref and {pred, ref} & {"yes", "no", "noanswer"}:
+        return scores
+    common = (Counter(pred.split()) & Counter(ref.split())).total()
+    if common:
+        precision, recall = common / len(pred.split()), common / len(ref.split())
+        scores.update(
+            precision=precision, recall=recall,
+            f1=2 * precision * recall / (precision + recall),
         )
-        return {"accuracy": float(correct)}
-    if result.answer is None:
-        return {"em": 0.0, "f1": 0.0}
-    prediction = _normalize_hotpotqa(result.answer)
-    gold = _normalize_hotpotqa(reference)
-    em = float(prediction == gold)
-    if not em and {prediction, gold} & {"yes", "no", "noanswer"}:
-        return {"em": em, "f1": 0.0}
-    pred_tokens, gold_tokens = prediction.split(), gold.split()
-    common = Counter(pred_tokens) & Counter(gold_tokens)
-    f1 = 2 * common.total() / (len(pred_tokens) + len(gold_tokens)) if common else 0.0
-    return {"em": em, "f1": f1}
+    return scores
+
+
+def gsm8k_number(text: str | None) -> Decimal | None:
+    """Keep only the last number of the text, after removing thousands commas."""
+    numbers = NUMBER.findall(THOUSANDS_COMMA.sub("", text or ""))
+    return Decimal(numbers[-1]) if numbers else None
+
+
+def gsm8k_correct(prediction: str | None, gold: str) -> bool:
+    """Numerical match between the model answer and the gold answer."""
+    number = gsm8k_number(prediction)
+    return number is not None and number == gsm8k_number(gold)
+
+
+# Per-question record
+
+
+def score_run(result: RunResult, row: pd.Series, dataset: str) -> dict:
+    """Metrics of one run; `row` is the dataset row with the gold answer."""
+    tokens = result.token_usage
+    record = {
+        "question": row["question"],
+        "gold": row["answer"],
+        "prediction": result.answer,
+        "termination": result.termination,
+        "actions": len(result.steps),
+        "failed_action": result.termination in FAILED_ACTIONS,
+        "seconds": result.elapsed_seconds,
+        # Only the input computed at each call: the KV-cached prefix is not counted.
+        "input_tokens": tokens.input_tokens - tokens.cached_tokens,
+        "output_tokens": tokens.output_tokens,
+    }
+    if dataset == "hotpotqa":
+        record.update(hotpotqa_scores(result.answer, row["answer"]))
+        record["correct"] = bool(record["em"])
+        support = hotpotqa_supporting_documents(row)
+        searches = [
+            set(step.documents) for step in result.steps
+            if step.action == "Search" and step.tool_called
+        ]
+        record["searches"] = len(searches)
+        record["gold_searches"] = sum(bool(docs & support) for docs in searches)
+    else:
+        record["correct"] = gsm8k_correct(result.answer, row["answer"])
+    return record
+
+
+# Evaluation loop
+
+
+def evaluate(
+    model: LanguageModel,
+    dataset: str,
+    k: int,
+    budget: int,
+    *,
+    mode: str = "react",
+    n: int | None = None,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """
+    Run the agent on `dataset` and return one row per question.
+
+    Parameters:
+        model: A loaded language model (shared across evaluations).
+        dataset: "hotpotqa" (distractor validation) or "gsm8k" (test).
+        k: Number of paragraphs returned by each Search action.
+        budget: Maximum number of ordinary model calls per question.
+        mode: "react", "focused_react", "direct" or "cot".
+        n: Evaluate a random sample of `n` questions (all if None).
+        seed: Random seed of the sample.
+    """
+    if dataset == "hotpotqa":
+        data = load_hotpotqa(include_context=True)
+    elif dataset == "gsm8k":
+        data = load_gsm8k()
+    else:
+        raise ValueError(f"Unknown dataset {dataset!r}: use 'hotpotqa' or 'gsm8k'.")
+    if n is not None:
+        data = data.sample(n, random_state=seed)
+
+    search_engine = SearchEngine(kind="sparse", search_by="document", top_k=k)
+    agent = ReActAgent(model, search_engine, max_steps=budget, task=dataset)
+    config = dict(zip(CONFIG, (model.config["model"], dataset, mode, k, budget)))
+
+    records = []
+    for _, row in tqdm(data.iterrows(), total=len(data), desc=f"{dataset} {mode}", ncols=80):
+        result = agent.run(row["question"], mode=mode)
+        records.append(config | score_run(result, row, dataset))
+    return pd.DataFrame(records)
+
+
+def summarize(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate the rows of `evaluate` (or several concatenated) per configuration."""
+    summaries = []
+    for values, runs in df.groupby(CONFIG, sort=False):
+        summary = dict(zip(CONFIG, values))
+        summary.update(
+            questions=len(runs),
+            failed_action_pct=100 * runs["failed_action"].sum() / runs["actions"].sum(),
+            seconds=runs["seconds"].mean(),
+            input_tokens=runs["input_tokens"].mean(),
+            output_tokens=runs["output_tokens"].mean(),
+            actions_all=runs["actions"].mean(),
+            actions_correct=runs.loc[runs["correct"].astype(bool), "actions"].mean(),
+        )
+        if summary["dataset"] == "hotpotqa":
+            summary.update({m: 100 * runs[m].mean() for m in ("em", "precision", "recall", "f1")})
+            searches = runs["searches"].sum()
+            summary["gold_search_pct"] = (
+                100 * runs["gold_searches"].sum() / searches if searches else float("nan")
+            )
+        else:
+            summary["accuracy"] = 100 * runs["correct"].mean()
+        summaries.append(summary)
+    return pd.DataFrame(summaries)

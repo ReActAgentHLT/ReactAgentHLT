@@ -9,7 +9,7 @@ from transformers.generation import GenerateDecoderOnlyOutput
 
 from reactagenthlt.agents.react import parse_action, run_react
 from reactagenthlt.agents.language_model import LanguageModel, TokenUsage
-from reactagenthlt.evaluation import diagnose_formats, score_answer, summarize_run
+from reactagenthlt.evaluation import gsm8k_correct, hotpotqa_scores, score_run, summarize
 from reactagenthlt.preprocessing import hotpotqa_corpus, hotpotqa_supporting_documents
 from reactagenthlt.tools import SearchEngine
 
@@ -32,7 +32,10 @@ class TestExperimentRules(unittest.TestCase):
                 self.assertTrue(prompt.endswith("Question: What is the capital of Italy?\n"))
                 self.assertNotIn("Search[", prompt)
                 search.search.assert_not_called()
-                self.assertEqual(score_answer(result, "the Rome!"), {"em": 1.0, "f1": 1.0})
+                self.assertEqual(
+                    hotpotqa_scores(result.answer, "the Rome!"),
+                    {"em": 1.0, "precision": 1.0, "recall": 1.0, "f1": 1.0},
+                )
 
     def test_focused_react_adds_reminder_and_early_stop_to_react(self):
         for mode in ("react", "focused_react"):
@@ -62,12 +65,11 @@ class TestExperimentRules(unittest.TestCase):
                         sum("Observation: 5" in message["content"] for message in history[-1]),
                         1,
                     )
-                summary = summarize_run(result)
-                self.assertEqual(summary["ordinary_calls"], 3 if forced else 4)
-                self.assertEqual(summary["tool_calls"], 2 if forced else 3)
-                self.assertEqual(summary["prompt_tokens"], 20)
-                self.assertEqual(summary["completion_tokens"], 8)
-                self.assertEqual(score_answer(result, "5"), {"accuracy": 1.0})
+                self.assertEqual(sum(not s.forced for s in result.steps), 3 if forced else 4)
+                self.assertEqual(sum(s.tool_called for s in result.steps), 2 if forced else 3)
+                self.assertEqual(result.token_usage.input_tokens, 20)
+                self.assertEqual(result.token_usage.output_tokens, 8)
+                self.assertTrue(gsm8k_correct(result.answer, "5"))
 
     def test_default_budget_and_extra_finish_call(self):
         outputs = [f"Action: Calculate[{n}+1]" for n in range(9)]
@@ -75,7 +77,7 @@ class TestExperimentRules(unittest.TestCase):
         result = run_react("Question?", generate, task="gsm8k", mode="focused_react")
         self.assertEqual(result.termination, "budget_exhausted")
         self.assertEqual(generate.call_count, 9)
-        self.assertEqual(score_answer(result, "1"), {"accuracy": 0.0})
+        self.assertFalse(gsm8k_correct(result.answer, "1"))
 
         search = Mock(spec=SearchEngine)
         search.search.return_value = pd.DataFrame({"document": ["Evidence"]})
@@ -99,24 +101,19 @@ class TestExperimentRules(unittest.TestCase):
             "Action: Calculate[1 / 0]": "invalid_tool_input",
             "Action: Finish[answer]": "invalid_final_answer",
         }
-        results = []
+        row = pd.Series({"question": "Question?", "answer": "5"})
         for text, reason in examples.items():
             with self.subTest(reason=reason, text=text):
                 generate = scripted_generator(text, "Action: Finish[5]")
                 result = run_react("Question?", generate, task="gsm8k", mode="focused_react")
-                results.append(result)
                 self.assertEqual(result.termination, reason)
                 self.assertEqual(result.steps[0].raw_output, text)
                 self.assertEqual(generate.call_count, 1)
-                self.assertEqual(score_answer(result, "5"), {"accuracy": 0.0})
+                record = score_run(result, row, "gsm8k")
+                self.assertTrue(record["failed_action"])
+                self.assertFalse(record["correct"])
                 if reason != "invalid_tool_input":
                     self.assertFalse(result.steps[0].tool_called)
-        report = diagnose_formats(results)
-        self.assertEqual(report["affected_calls"], 5)
-        self.assertEqual(report["categories"]["capitalization"], 2)
-        self.assertEqual(report["categories"]["parentheses_instead_of_brackets"], 2)
-        self.assertEqual(report["categories"]["markdown_wrapper"], 1)
-        self.assertEqual(report["categories"]["multiple_commands"], 1)
 
     def test_calculation_strips_only_grouped_thousands_commas(self):
         generate = scripted_generator(
@@ -130,7 +127,7 @@ class TestExperimentRules(unittest.TestCase):
         self.assertEqual(result.steps[0].observation, "1500.5")
         self.assertFalse(result.steps[1].repeated)
         self.assertEqual(result.answer, "1,500.5")
-        self.assertEqual(score_answer(result, "1500.5"), {"accuracy": 1.0})
+        self.assertTrue(gsm8k_correct(result.answer, "1500.5"))
         for expression in ("1,0000 + 1", "12,34 + 1", "12345,678 + 1", "0.5,000 + 1"):
             with self.subTest(expression=expression):
                 generate = scripted_generator(f"Action: Calculate[{expression}]")
@@ -148,13 +145,14 @@ class TestExperimentRules(unittest.TestCase):
                 result = run_react("Question?", generate, task="gsm8k", mode="focused_react")
                 self.assertEqual(result.termination, reason)
                 self.assertTrue(result.steps[-1].forced)
-                self.assertEqual(summarize_run(result)["tool_calls"], 1)
+                self.assertEqual(sum(s.tool_called for s in result.steps), 1)
 
-    def test_infrastructure_failures_are_unscored(self):
+    def test_infrastructure_failures_are_not_failed_actions(self):
+        row = pd.Series({"question": "Question?", "answer": "1"})
         generate = Mock(side_effect=OSError("model unavailable"))
         result = run_react("Question?", generate, task="gsm8k")
         self.assertEqual(result.termination, "model_error")
-        self.assertIsNone(score_answer(result, "1"))
+        self.assertFalse(score_run(result, row, "gsm8k")["failed_action"])
 
         search = Mock(spec=SearchEngine)
         search.search.side_effect = ValueError("index unavailable")
@@ -163,13 +161,14 @@ class TestExperimentRules(unittest.TestCase):
         search.search.assert_called_once_with("A Test!")
         self.assertEqual(result.steps[0].argument, "a test")
         self.assertEqual(result.termination, "tool_error")
-        self.assertIsNone(score_answer(result, "Rome"))
 
     def test_selected_rows_form_one_corpus_and_support_can_be_scored(self):
         rows = pd.DataFrame([
-            {"context": {"title": ["Rome", "Paris"], "sentences": [["Italy"], ["France"]]},
+            {"question": "Question?", "answer": "Rome",
+             "context": {"title": ["Rome", "Paris"], "sentences": [["Italy"], ["France"]]},
              "supporting_facts": {"title": ["Rome", "Paris"]}},
-            {"context": {"title": ["Rome", "Lima"], "sentences": [["Italy"], ["Peru"]]},
+            {"question": "Question?", "answer": "Lima",
+             "context": {"title": ["Rome", "Lima"], "sentences": [["Italy"], ["Peru"]]},
              "supporting_facts": {"title": ["Lima"]}},
         ])
         corpus = hotpotqa_corpus(rows)
@@ -177,9 +176,11 @@ class TestExperimentRules(unittest.TestCase):
         search = SearchEngine(corpus=corpus, top_k=2)
         generate = scripted_generator("Action: Search[Rome]", "Action: Search[Paris]", "Action: Finish[Rome]")
         result = run_react("Question?", generate, task="hotpotqa", search_engine=search)
-        summary = summarize_run(result, hotpotqa_supporting_documents(rows.iloc[0]))
-        self.assertEqual(summary["supporting_paragraphs_retrieved"], 2)
-        self.assertTrue(summary["all_supporting_paragraphs_retrieved"])
+        self.assertEqual(len(hotpotqa_supporting_documents(rows.iloc[0])), 2)
+        record = score_run(result, rows.iloc[0], "hotpotqa")
+        self.assertEqual((record["searches"], record["gold_searches"]), (2, 2))
+        self.assertTrue(record["correct"])
+        self.assertEqual(record["actions"], 3)
 
     def test_transformers_generator_preserves_full_reply(self):
         model = LanguageModel.__new__(LanguageModel)
@@ -434,7 +435,6 @@ class TestReActLoop(unittest.TestCase):
         result = run_react("Where was Hideaki Anno born?", generate)
 
         self.assertEqual(result.termination, "tool_error")
-        self.assertIsNone(score_answer(result, "Ube"))
 
     def test_every_agent_can_use_every_tool(self):
         """No dataset restricts the tools: Search and Calculate work in one run."""
@@ -446,14 +446,42 @@ class TestReActLoop(unittest.TestCase):
         result = run_react("Question?", generate, search_engine=search)
         self.assertEqual(result.termination, "finished")
         self.assertEqual(result.answer, "5")
-        self.assertEqual(summarize_run(result)["tool_calls"], 2)
+        self.assertEqual(sum(s.tool_called for s in result.steps), 2)
 
-    def test_gsm8k_scoring_validates_the_answer_format(self):
-        for answer, correct in [("5", 1.0), ("+5.00", 1.0), ("five", 0.0), ("5 apples", 0.0)]:
+    def test_gsm8k_scoring_matches_numbers_only(self):
+        for answer, gold, correct in [
+            ("5", "5", True), ("+5.00", "5", True), ("5 apples", "5", True),
+            ("3 + 2 = 5", "5", True), ("$1,500.50", "1500.5", True),
+            ("1,000,000", "1,000,000", True), ("-3", "3", False),
+            ("12,34", "1234", False), ("five", "5", False),
+        ]:
             with self.subTest(answer=answer):
                 generate = scripted_generator(f"Action: Finish[{answer}]")
                 result = run_react("Question?", generate, task="gsm8k")
-                self.assertEqual(score_answer(result, "5"), {"accuracy": correct})
+                self.assertEqual(gsm8k_correct(result.answer, gold), correct)
+
+    def test_hotpotqa_precision_recall(self):
+        scores = hotpotqa_scores("The Eiffel Tower", "Eiffel Tower in Paris")
+        self.assertEqual((scores["em"], scores["precision"], scores["recall"]), (0.0, 1.0, 0.5))
+        self.assertAlmostEqual(scores["f1"], 2 / 3)
+        self.assertEqual(hotpotqa_scores("yes", "yes it is")["f1"], 0.0)
+        self.assertEqual(hotpotqa_scores(None, "Rome")["em"], 0.0)
+
+    def test_summary_aggregates_per_configuration(self):
+        config = {"model": "m", "dataset": "hotpotqa", "mode": "react", "k": 2, "budget": 9}
+        df = pd.DataFrame([
+            config | {"actions": 3, "failed_action": False, "correct": True, "seconds": 1.0,
+                      "input_tokens": 10, "output_tokens": 4, "em": 1.0, "precision": 1.0,
+                      "recall": 1.0, "f1": 1.0, "searches": 2, "gold_searches": 1},
+            config | {"actions": 1, "failed_action": True, "correct": False, "seconds": 3.0,
+                      "input_tokens": 20, "output_tokens": 6, "em": 0.0, "precision": 0.0,
+                      "recall": 0.0, "f1": 0.0, "searches": 0, "gold_searches": 0},
+        ])
+        summary = summarize(df).iloc[0]
+        self.assertEqual(summary["failed_action_pct"], 25.0)
+        self.assertEqual((summary["actions_all"], summary["actions_correct"]), (2.0, 3.0))
+        self.assertEqual((summary["em"], summary["gold_search_pct"]), (50.0, 50.0))
+        self.assertEqual((summary["seconds"], summary["input_tokens"]), (2.0, 15.0))
 
     def test_calculation_error_ends_the_run(self):
         """

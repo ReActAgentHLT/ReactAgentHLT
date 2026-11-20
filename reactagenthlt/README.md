@@ -60,6 +60,33 @@ Run the interactive standard agent from the repository root:
 python -m reactagenthlt.agents.standard path/to/model-config.json --sample --stream
 ```
 
+## Evaluation
+
+`evaluate()` runs an agent over a dataset and returns one `DataFrame` row per
+question; `summarize()` aggregates the rows (also of several concatenated runs)
+per model, dataset, mode, `k` and budget.
+
+```python
+import pandas as pd
+from reactagenthlt.evaluation import evaluate, summarize
+
+model = LanguageModel("configs/qwen2.5-3B.json")
+df = pd.concat([
+    evaluate(model, "hotpotqa", k=2, budget=9, n=100),
+    evaluate(model, "gsm8k", k=2, budget=9, n=100, mode="focused_react"),
+])
+summary = summarize(df)
+```
+
+Per question: `actions` (model calls), `failed_action` (the run ended on a
+missing or invalid action), `seconds` (from the first call to the answer),
+`input_tokens` (new input only: the KV-cached prefix of each call is not
+counted), `output_tokens`, `correct`; for HotpotQA also `em`, `precision`,
+`recall`, `f1` (official normalization) and `searches` / `gold_searches`
+(searches returning at least one gold paragraph). GSM8K answers are correct when
+the last number of the prediction, with thousands commas removed, equals the
+gold number.
+
 ## Preprocessing
 
 For the dataset preprocessing needed for agents evaluation and search engine
