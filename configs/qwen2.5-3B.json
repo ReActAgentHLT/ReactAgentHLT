@@ -1,6 +1,6 @@
 {
     "model": "Qwen/Qwen2.5-3B-Instruct",
-    "max_new_tokens": 256,
+    "max_new_tokens": 32768,
     "sampling": {
         "temperature": 0.6,
         "top_k": 20,

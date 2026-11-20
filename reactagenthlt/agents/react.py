@@ -22,7 +22,6 @@ from reactagenthlt.agents.prompts import COT, DIRECT, FORCE_FINISH, REACT, REITE
 from reactagenthlt.tools import Calculator, SearchEngine
 from reactagenthlt.tools.search_engine import RetrievalTokenizer
 
-
 TOOLS = {"Search", "Calculate"}
 TASKS = {"hotpotqa", "gsm8k"}
 DEFAULT_MAX_STEPS = 9
@@ -71,7 +70,9 @@ class RunResult:
 
     @property
     def token_usage(self) -> TokenUsage:
-        counts = [step.token_usage for step in self.steps if step.token_usage is not None]
+        counts = [
+            step.token_usage for step in self.steps if step.token_usage is not None
+        ]
         return TokenUsage(
             input_tokens=sum(count.input_tokens for count in counts),
             output_tokens=sum(count.output_tokens for count in counts),
@@ -86,7 +87,9 @@ class RunResult:
 # Action parsing
 
 
-def parse_action(model_output: str, mode: str = "react", forced: bool = False) -> tuple[str, str]:
+def parse_action(
+    model_output: str, mode: str = "react", forced: bool = False
+) -> tuple[str, str]:
     """
     Extract an action and its exact argument from the language model's output.
 
@@ -143,7 +146,9 @@ def _read_step(text: str, step: StepTrace, result: RunResult) -> None:
     elif step.action == "Search":
         step.argument = " ".join(SEARCH_TOKENIZER.tokenize(step.argument))
     else:
-        step.argument = GROUPED_NUMBER.sub(lambda m: m[0].replace(",", ""), step.argument)
+        step.argument = GROUPED_NUMBER.sub(
+            lambda m: m[0].replace(",", ""), step.argument
+        )
     if not step.argument:
         raise InvalidOutput("invalid_tool_input")
 
@@ -355,7 +360,8 @@ class ReActAgent(BaseAgent):
             strip_output=False,
         )
         return run_react(
-            question, generate,
+            question,
+            generate,
             task=self.task,
             mode=mode,
             search_engine=self.search_engine,
@@ -389,8 +395,7 @@ if __name__ == "__main__":
     agent = ReActAgent(language_model, search_engine=search_engine)
     while True:
         try:
-            prompt = input("user: ")
-            print("agent: ", end="")
+            prompt = input("Question: ")
             response = agent.ask(prompt, do_sample=args.sample, stream=args.stream)
             if not args.stream:
                 print(response.output)
