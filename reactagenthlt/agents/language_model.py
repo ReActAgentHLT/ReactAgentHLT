@@ -22,6 +22,11 @@ class TokenUsage:
 
 
 class RegexStop(StoppingCriteria):
+    """
+    Stops the model generation when the pattern is generated. Note that the
+    pattern will be present in the generated string as well.
+    """
+
     def __init__(self, tokenizer, pattern, prompt_length):
         self.tokenizer = tokenizer
         self.regex = re.compile(pattern)
@@ -34,6 +39,10 @@ class RegexStop(StoppingCriteria):
 
 
 class LanguageModel:
+    """
+    Wrapper around HuggingFace transfomers API for causal text generation.
+    """
+
     def __init__(
         self,
         configpath: str,
@@ -41,6 +50,17 @@ class LanguageModel:
         stream: bool = False,
         stop_criterias: list[str] = [],
     ) -> None:
+        """
+        Args:
+            configpath: path to the config file of the model
+
+            do_sample: enables text generation using sampling config in the
+            config file stream
+
+            stream: enables generated text to appear on stdout token by token
+
+            stop_criterias: list of regex to force the generation to stop
+        """
         with open(configpath, "r") as configfile:
             config = json.load(configfile)
 
@@ -59,6 +79,14 @@ class LanguageModel:
 
     @torch.inference_mode()
     def generate(self, messages: list[dict[str, str]]) -> tuple[str, TokenUsage]:
+        """
+        Args:
+            messages: list of chat templates
+
+        Returns:
+            A tuple containing the output generated string and the relative
+            token usage for the given messages.
+        """
 
         # tokenize the input
         inputs = cast(
