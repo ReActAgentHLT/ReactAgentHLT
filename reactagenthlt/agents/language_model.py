@@ -68,6 +68,8 @@ class LanguageModel:
         do_sample: bool = False,
         stream: bool = False,
         stop_criteria: tuple[str, ...] = (),
+        *,
+        strip_output: bool = True,
     ) -> tuple[str, TokenUsage]:
         """
         Args:
@@ -76,6 +78,7 @@ class LanguageModel:
             stream: Print generated tokens to stdout as they are produced.
             stop_criteria: Regex patterns that stop generation when matched.
                 The matched text remains in the generated output.
+            strip_output: Trim surrounding whitespace from the reply.
 
         Returns:
             Generated text and token usage for this model call.
@@ -126,7 +129,7 @@ class LanguageModel:
         output = str(self.tokenizer.decode(generated, skip_special_tokens=True))
 
         return (
-            output.strip(),
+            output.strip() if strip_output else output,
             TokenUsage(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,

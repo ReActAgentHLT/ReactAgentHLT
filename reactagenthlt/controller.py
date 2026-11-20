@@ -4,6 +4,10 @@ from collections.abc import Callable
 from reactagenthlt.tools import Calculator, SearchEngine
 
 
+class InvalidCalculation(ValueError):
+    """The requested expression cannot be evaluated as arithmetic."""
+
+
 def parse_action(model_output: str) -> tuple[str, str]:
     """
     Extract an action and its argument from the language model's output.
@@ -73,7 +77,7 @@ def execute_calculation(expression: str) -> str:
     """
 
     # Allow only numbers and basic arithmetic symbols.
-    allowed_pattern = r"[0-9+\-*/(). %]+"
+    allowed_pattern = r"[0-9+\-*/(). ]+"
 
     # Reject long expressions, unsupported characters, and exponentiation.
     if (
@@ -82,15 +86,18 @@ def execute_calculation(expression: str) -> str:
         or "**" in expression
         or "//" in expression
     ):
-        raise ValueError("Invalid or unsupported calculation.")
+        raise InvalidCalculation("Invalid or unsupported calculation.")
 
     # Use the Calculator already implemented by Federico.
     calculator = Calculator()
 
     try:
         result = calculator.calculate(expression)
-    except (ArithmeticError, SyntaxError, ValueError, TypeError) as error:
-        raise ValueError("Calculation failed.") from error
+    except (ArithmeticError, SyntaxError, TypeError) as error:
+        raise InvalidCalculation("Calculation failed.") from error
+
+    if type(result) not in (int, float):
+        raise InvalidCalculation("Expected a numerical result.")
 
     # Return text because ReAct observations are passed back to the model.
     return str(result)
@@ -126,17 +133,16 @@ def execute_search(query: str, search_engine: SearchEngine) -> str:
         raise ValueError("Search query cannot be empty.")
 
     # Use Federico's search tool to retrieve relevant documents.
+    return format_search_observation(retrieve_documents(query, search_engine))
+
+
+def retrieve_documents(query: str, search_engine: SearchEngine) -> list[str]:
     results = search_engine.search(query)
+    return [] if results.empty else results["document"].tolist()
 
-    # Handle the case where no documents are returned.
-    if results.empty:
-        return "No documents found."
 
-    # Combine the retrieved documents into one text observation.
-    # Each document is separated by a blank line for readability.
-    documents = results["document"].tolist()
-
-    return "\n\n".join(documents)
+def format_search_observation(documents: list[str]) -> str:
+    return "\n\n".join(documents) if documents else "No documents found."
 
 
 def run_react(

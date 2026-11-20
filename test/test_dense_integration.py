@@ -3,7 +3,6 @@
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -39,15 +38,13 @@ class TestDenseControllerIntegration(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as temp_dir,
             patch(
-                "reactagenthlt.tools.__file__", str(Path(temp_dir) / "pkg" / "tools.py")
+                "reactagenthlt.tools.search_engine.__file__",
+                str(Path(temp_dir) / "pkg" / "tools" / "search_engine.py"),
             ),
-            patch.dict(
-                "sys.modules",
-                {
-                    "sentence_transformers": SimpleNamespace(
-                        SentenceTransformer=FakeSentenceTransformer
-                    )
-                },
+            patch("reactagenthlt.tools.search_engine.hotpotqa_corpus", return_value=corpus),
+            patch(
+                "reactagenthlt.tools.search_engine.SentenceTransformer",
+                FakeSentenceTransformer,
             ),
         ):
             engine = SearchEngine(kind="dense", top_k=1)

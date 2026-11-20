@@ -5,7 +5,12 @@ from datasets import load_dataset
 from tqdm import tqdm
 
 
-def load_hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFrame:
+GSM8K_NUMBER = r"[+-]?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?"
+
+
+def load_hotpotqa(
+    setting: str = "distractor", train: bool = False, *, include_context: bool = False
+) -> pd.DataFrame:
     """
     Fetch HotPotQA dataset from HuggingFace and returns it as a `pandas`
     `DataFrame`
@@ -18,8 +23,8 @@ def load_hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFr
         select if to return the `train` or `validation` split of the dataset
 
     ## Returns
-    A `DataFrame` containing the dataset with only `question` and `answer`
-    fields
+    Questions and answers. With `include_context`, also return the question ID,
+    original context, and supporting facts for corpus building and evaluation.
     """
     choices = {"distractor", "fullwiki"}
     if setting not in choices:
@@ -31,7 +36,10 @@ def load_hotpotqa(setting: str = "distractor", train: bool = False) -> pd.DataFr
         load_dataset("hotpotqa/hotpot_qa", setting)[split].to_pandas(),
     )
 
-    return ds[["question", "answer"]]
+    columns = ["question", "answer"]
+    if include_context:
+        columns.extend(["id", "context", "supporting_facts"])
+    return ds[columns]
 
 
 def load_gsm8k(
@@ -70,7 +78,7 @@ def load_gsm8k(
 
     if not reasoning:
         answers = ds["answer"].str.extract(
-            r"####\s*([+-]?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?)\s*\Z",
+            rf"####\s*({GSM8K_NUMBER})\s*\Z",
             expand=False,
         )
         invalid = answers.isna()
@@ -88,38 +96,36 @@ def load_gsm8k(
     return ds
 
 
-def hotpotqa_corpus() -> pd.DataFrame:
+def _hotpotqa_documents(context):
+    """Yield titles, bodies and rendered passages from one question's context."""
+    for title, sentences in zip(context["title"], context["sentences"]):
+        content = "".join(sentence.removeprefix(" ") + "\n" for sentence in sentences)
+        yield title, content, f"{title}\n\n{content}"
+
+
+def hotpotqa_supporting_documents(row: pd.Series) -> set[str]:
+    """Return the titled passages containing the question's gold supporting facts."""
+    titles = set(row["supporting_facts"]["title"])
+    return {
+        document for title, _, document in _hotpotqa_documents(row["context"])
+        if title in titles
+    }
+
+
+def hotpotqa_corpus(rows: pd.DataFrame | None = None) -> pd.DataFrame:
     """
-    Build a knowledge base using the `context` field of HotPotQA in the
-    `distractor` setting and using the `validation` split to simulate a real web
-    search.
+    Pool the source and distractor passages across the selected rows.
+    By default, use the full distractor validation split.
 
     ## Returns
     A `DataFrame` containing all the paragraphs contained in each context field
     without duplicates.
     """
-    ds = cast(
-        pd.DataFrame,
-        load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas(),
-    )
-
-    out = {"title": [], "content": [], "document": []}
-    for context in tqdm(ds["context"], desc="building corpus", ncols=80):
-        titles = context["title"]  # list of titles
-        sentences = context["sentences"]  # list of lists of paragraphs
-
-        for title, paragraphs in zip(titles, sentences):
-            content = ""
-            for paragraph in paragraphs:
-                # some paragraphs begins with a whitespace -> remove
-                content += paragraph.removeprefix(" ") + "\n"
-
-            out["title"].append(title)
-            out["content"].append(content)
-            out["document"].append(title + "\n\n" + content)
-
-    df = pd.DataFrame(out)
-
-    return df.drop_duplicates(subset=["title", "content", "document"]).reset_index(
-        drop=True
+    if rows is None:
+        rows = load_dataset("hotpotqa/hotpot_qa", "distractor")["validation"].to_pandas()
+    documents = []
+    for context in tqdm(rows["context"], desc="building corpus", ncols=80):
+        documents.extend(_hotpotqa_documents(context))
+    return pd.DataFrame(documents, columns=["title", "content", "document"]).drop_duplicates(
+        ignore_index=True
     )

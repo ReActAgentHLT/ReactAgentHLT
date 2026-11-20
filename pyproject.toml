@@ -26,13 +26,15 @@ dependencies = [
     "transformers>=5.22.2",
 ]
 
+[project.optional-dependencies]
+gguf = ["llama-cpp-python>=0.3.4"]
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["reactagenthlt"]
-package-dir = { reactagenthlt = "reactagenthlt" }
+[tool.setuptools.packages.find]
+include = ["reactagenthlt", "reactagenthlt.*"]
 
 [dependency-groups]
 dev = [

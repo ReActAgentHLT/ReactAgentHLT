@@ -35,6 +35,8 @@ class SearchEngine:
         kind: str = "sparse",
         search_by: str = "document",
         top_k: int = 3,
+        *,
+        corpus: pd.DataFrame | None = None,
     ) -> None:
         """
         kind: `str`
@@ -48,6 +50,8 @@ class SearchEngine:
 
         top_k: `int`
             number of retrieved documents per query
+
+        corpus: pooled HotpotQA passages from the selected questions
         """
         if kind not in {"sparse", "dense"}:
             raise ValueError(
@@ -64,7 +68,9 @@ class SearchEngine:
                 f"{top_k} is invalid value for 'top_k': must  be greater than 0"
             )
 
-        self.corpus = hotpotqa_corpus()
+        self.corpus = hotpotqa_corpus() if corpus is None else corpus
+        if self.corpus.empty:
+            raise ValueError("Search corpus cannot be empty")
         self.kind = kind
         self.top_k = top_k
 
@@ -83,7 +89,7 @@ class SearchEngine:
                 data = document.encode("utf-8")
                 digest.update(len(data).to_bytes(8, "big"))
                 digest.update(data)
-            cache_dir = Path(__file__).resolve().parent.parent / ".search_embeddings"
+            cache_dir = Path(__file__).resolve().parents[2] / ".search_embeddings"
             cache_path = cache_dir / f"{digest.hexdigest()}.npy"
 
             if cache_path.exists():
