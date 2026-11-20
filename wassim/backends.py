@@ -1,4 +1,4 @@
-"""Two small inference backends behind one streaming interface."""
+"""Model backends: GGUF via llama.cpp, Hugging Face folders via transformers."""
 
 from __future__ import annotations
 
@@ -7,9 +7,27 @@ import os
 from pathlib import Path
 from typing import Callable, Iterator
 
+# The caller can send a plain prompt or a chat-style list of messages.
+ChatInput = str | list[dict[str, str]]
+
+
+def _as_messages(prompt: ChatInput) -> list[dict[str, str]]:
+    """Treat a plain string as one user message."""
+    if isinstance(prompt, str):
+        return [{"role": "user", "content": prompt}]
+    return prompt
+
+
+def _plain_text(prompt: ChatInput) -> str:
+    """Fallback for models that have no chat template."""
+    messages = _as_messages(prompt)
+    if len(messages) == 1:
+        return messages[0]["content"]
+    return "\n\n".join(message["content"] for message in messages)
+
 
 def detect_backend(model_path: str | Path) -> str:
-    """Return 'gguf' for a .gguf file, 'hf' for a local transformers directory."""
+    """Return 'gguf' for a .gguf file, 'hf' for a local transformers folder."""
     path = Path(model_path)
     if path.is_file() and path.suffix.lower() == ".gguf":
         return "gguf"
@@ -17,11 +35,12 @@ def detect_backend(model_path: str | Path) -> str:
         return "hf"
     raise ValueError(
         f"Unsupported model path: {path}. Use a .gguf file or a Hugging Face "
-        "model directory that contains config.json."
+        "model directory with config.json."
     )
 
 
 def _device_info() -> dict:
+    """Small model/GPU report."""
     import torch
 
     if not torch.cuda.is_available():
@@ -36,14 +55,20 @@ def _device_info() -> dict:
 
 
 class LlamaCppBackend:
-    """GGUF models through llama-cpp-python, with all layers on the GPU."""
+    """GGUF model through llama-cpp-python, all layers on the GPU."""
 
     name = "llama.cpp"
 
-    def __init__(self, model_path: str | Path, n_ctx: int = 8192, n_gpu_layers: int = -1, seed: int = 0):
+    def __init__(
+        self,
+        model_path: str | Path,
+        n_ctx: int = 8192,
+        n_gpu_layers: int = -1,
+        seed: int = 0,
+    ):
         import torch
 
-        # torch bundles the CUDA 12 DLLs; llama.dll needs them before import.
+        # On Windows, llama.dll needs torch's CUDA 12 DLLs before it is imported.
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(str(Path(torch.__file__).parent / "lib"))
 
@@ -58,29 +83,25 @@ class LlamaCppBackend:
             seed=seed,
             verbose=False,
         )
-        meta = self.llm.metadata or {}
-        self.chat_template = meta.get("tokenizer.chat_template")
-        self.last_prompt_tokens = 0
+        self.chat_template = (self.llm.metadata or {}).get("tokenizer.chat_template")
         self.last_completion_tokens = 0
 
-    def render(self, prompt: str) -> str:
-        """Apply the model's chat template to one user message."""
+    def render(self, prompt: ChatInput) -> str:
+        """Apply the model's chat template, or use plain text if it has none."""
         if not self.chat_template:
-            return prompt
+            return _plain_text(prompt)
+
         from jinja2.sandbox import ImmutableSandboxedEnvironment
 
         env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True)
         template = env.from_string(self.chat_template)
         return template.render(
-            messages=[{"role": "user", "content": prompt}],
+            messages=_as_messages(prompt),
             add_generation_prompt=True,
         )
 
     def count_tokens(self, text: str) -> int:
         return len(self.llm.tokenize(text.encode("utf-8"), add_bos=False, special=True))
-
-    def count_prompt_tokens(self, text: str) -> int:
-        return self.count_tokens(text)
 
     def stream(
         self,
@@ -89,7 +110,6 @@ class LlamaCppBackend:
         stop_strings: tuple[str, ...],
         should_stop: Callable[[str], bool],
     ) -> Iterator[str]:
-        self.last_prompt_tokens = self.count_tokens(rendered_prompt)
         self.last_completion_tokens = 0
         text = ""
         stream = self.llm.create_completion(
@@ -105,11 +125,13 @@ class LlamaCppBackend:
                 continue
             text += piece
             yield piece
+
             usage = chunk.get("usage") or {}
             if usage.get("completion_tokens"):
                 self.last_completion_tokens = usage["completion_tokens"]
             if should_stop(text):
                 break
+
         if not self.last_completion_tokens:
             self.last_completion_tokens = self.count_tokens(text)
 
@@ -132,7 +154,7 @@ class LlamaCppBackend:
 
 
 class HFBackend:
-    """Unquantized Hugging Face model directory through transformers."""
+    """Unquantized Hugging Face model folder through transformers."""
 
     name = "transformers"
 
@@ -158,26 +180,22 @@ class HFBackend:
         )
         self.model.eval()
         self.device = self.model.device
-        self.last_prompt_tokens = 0
         self.last_completion_tokens = 0
         self._error: Exception | None = None
 
-    def render(self, prompt: str) -> str:
+    def render(self, prompt: ChatInput) -> str:
+        """Apply the tokenizer's chat template, or use plain text if it has none."""
+        messages = _as_messages(prompt)
         if not self.has_template:
-            return prompt
+            return _plain_text(messages)
         return self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
+            messages,
             tokenize=False,
             add_generation_prompt=True,
         )
 
     def count_tokens(self, text: str) -> int:
         return len(self.tokenizer.encode(text, add_special_tokens=False))
-
-    def count_prompt_tokens(self, text: str) -> int:
-        return len(
-            self.tokenizer(text, add_special_tokens=not self.has_template)["input_ids"]
-        )
 
     def stream(
         self,
@@ -191,24 +209,22 @@ class HFBackend:
         import torch
         from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
 
-        def make_criteria():
-            class StopOnText(StoppingCriteria):
-                def __init__(self):
-                    super().__init__()
-                    self.n_generated = 0
+        class StopOnText(StoppingCriteria):
+            """Stop as soon as a stop string or the caller's rule matches."""
 
-                def __call__(self, input_ids, scores, **kwargs):
-                    generated = input_ids[0, self.prompt_len:]
-                    self.n_generated = int(generated.shape[0])
-                    text = self.tokenizer.decode(generated, skip_special_tokens=True)
-                    return any(s in text for s in self.stop_strings) or self.should_stop(text)
+            def __init__(self, tokenizer, prompt_len, stop_strings, should_stop):
+                super().__init__()
+                self.tokenizer = tokenizer
+                self.prompt_len = prompt_len
+                self.stop_strings = stop_strings
+                self.should_stop = should_stop
+                self.n_generated = 0
 
-            criteria = StopOnText()
-            criteria.tokenizer = self.tokenizer
-            criteria.prompt_len = prompt_len
-            criteria.stop_strings = stop_strings
-            criteria.should_stop = should_stop
-            return criteria
+            def __call__(self, input_ids, scores, **kwargs):
+                generated = input_ids[0, self.prompt_len:]
+                self.n_generated = int(generated.shape[0])
+                text = self.tokenizer.decode(generated, skip_special_tokens=True)
+                return any(s in text for s in self.stop_strings) or self.should_stop(text)
 
         inputs = self.tokenizer(
             rendered_prompt,
@@ -217,10 +233,15 @@ class HFBackend:
         )
         prompt_len = int(inputs["input_ids"].shape[1])
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
+
         streamer = TextIteratorStreamer(
-            self.tokenizer, skip_prompt=True, skip_special_tokens=True
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
         )
-        criteria = make_criteria()
+        criteria = StopOnText(
+            self.tokenizer, prompt_len, stop_strings, should_stop
+        )
         kwargs = {
             **inputs,
             "max_new_tokens": max_new_tokens,
@@ -231,14 +252,13 @@ class HFBackend:
         }
 
         self._error = None
-        self.last_prompt_tokens = prompt_len
         self.last_completion_tokens = 0
 
         def generate():
             try:
                 with torch.inference_mode():
                     self.model.generate(**kwargs)
-            except Exception as exc:  # surface the real error to the caller
+            except Exception as exc:
                 self._error = exc
                 try:
                     streamer.end()
@@ -276,7 +296,9 @@ class HFBackend:
         device_map = getattr(self.model, "hf_device_map", None)
         if device_map:
             info["device_map"] = {str(k): str(v) for k, v in device_map.items()}
-            info["cpu_offload"] = any(str(v) in ("cpu", "disk") for v in device_map.values())
+            info["cpu_offload"] = any(
+                str(v) in ("cpu", "disk") for v in device_map.values()
+            )
         if torch.cuda.is_available():
             info["gpu"] = torch.cuda.get_device_name(0)
         return info
