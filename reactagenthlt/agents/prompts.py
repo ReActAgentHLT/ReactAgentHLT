@@ -1,23 +1,45 @@
-"""Zero-shot prompts for the two tasks and the Focused ReAct interventions."""
+"""Few-shot task prompts and instructions for the Focused ReAct interventions."""
 
 DIRECT = {
-    "hotpotqa": """Answer the question.
+    "hotpotqa": """Answer the question in exactly one line: Finish[answer]. Use a short name, fact, or yes/no as appropriate.
 
-Return only the short final answer in this format:
-Finish[answer]""",
-    "gsm8k": """Solve the math problem and return only the final numerical answer in this format:
-Finish[number]""",
+Examples:
+Question: In what country was the author of Pride and Prejudice born?
+Finish[England]
+
+Question: Are the Eiffel Tower and the Louvre in the same city?
+Finish[yes]""",
+    "gsm8k": """Solve the math problem. Return exactly one line: Finish[number]. Do not include units or an explanation.
+
+Examples:
+Question: Maya buys 3 packs of 8 pencils and gives away 5. How many does she have left?
+Finish[19]
+
+Question: A baker shares 30 rolls equally among 6 baskets. How many rolls are in each basket?
+Finish[5]""",
 }
 
 COT = {
-    "hotpotqa": """Answer the question. Reason step by step before giving your answer.
+    "hotpotqa": """Answer the question. Briefly connect the facts needed to reach the answer, then end with one line in the form Finish[answer].
 
-After your reasoning, provide a short final answer in this format:
-Finish[answer]""",
-    "gsm8k": """Solve the math problem step by step. Identify the quantities and operations needed to answer the question.
+Examples:
+Question: In what country was the author of Pride and Prejudice born?
+Jane Austen wrote Pride and Prejudice. She was born in England.
+Finish[England]
 
-After your reasoning, provide the final numerical answer in this format:
-Finish[number]""",
+Question: Are the Eiffel Tower and the Louvre in the same city?
+The Eiffel Tower is in Paris, and so is the Louvre.
+Finish[yes]""",
+    "gsm8k": """Solve the math problem. Show the key arithmetic steps, then end with one line in the form Finish[number]. Do not include units inside the brackets.
+
+Examples:
+Question: Maya buys 3 packs of 8 pencils and gives away 5. How many does she have left?
+She starts with 3 * 8 = 24 pencils. After giving away 5, she has 24 - 5 = 19.
+Finish[19]
+
+Question: A baker shares 30 rolls equally among 6 baskets. How many rolls are in each basket?
+An equal share is 30 / 6 = 5 rolls.
+Finish[5]""",
 }
 
 REACT = """Solve the task: either answer a question using the supplied collection of paragraphs, or solve a math problem. Some paragraphs may be irrelevant, and answering may require combining information from more than one paragraph.
@@ -27,11 +49,26 @@ Available actions:
 - Calculate[expression]: evaluate an arithmetic expression and return its result.
 - Finish[answer]: provide the final answer and end the task. Give a short answer for a question, or only the final number for a math problem.
 
-Choose the action that best serves your goal. At each step, briefly reason about what to do next, then output exactly one action on a separate line in this format:
-Thought: your reasoning
-Action: Search[query]
+For each reply, give one brief Thought: line, then exactly one Action: line and stop. The system supplies Observation: lines after tool calls; never write one yourself. Use observations to refine your next query or finish when you have enough information. Do not repeat a tool call that already returned a result.
 
-The action can be Search[query], Calculate[expression] or Finish[answer]. Choose exactly one action. After your action, the system will execute it and provide the result. Use that result to decide your next step. When you have the answer, finish with it."""
+Example transcripts (each Observation: is supplied by the system):
+
+Question: In what country was the author of Pride and Prejudice born?
+Thought: First find who wrote the novel.
+Action: Search[Pride and Prejudice author]
+Observation: Pride and Prejudice is a novel by Jane Austen.
+Thought: Now find where Jane Austen was born.
+Action: Search[Jane Austen birthplace]
+Observation: Jane Austen was born in Steventon, Hampshire, England.
+Thought: The observation gives the country.
+Action: Finish[England]
+
+Question: Nora fills 4 boxes with 9 marbles each, then gives away 7 marbles. How many are left?
+Thought: Multiply to find the total, then subtract the marbles she gives away.
+Action: Calculate[4 * 9 - 7]
+Observation: 29
+Thought: The calculation gives the number left.
+Action: Finish[29]"""
 
 REITERATE = """Original question: {question}
 Continue solving this question using the information available so far."""
