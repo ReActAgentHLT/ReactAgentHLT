@@ -1,4 +1,4 @@
-"""Exercise dense retrieval through the controller without external downloads."""
+"""Exercise dense retrieval through the ReAct loop without external downloads."""
 
 import tempfile
 import unittest
@@ -8,7 +8,8 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from reactagenthlt.controller import run_react
+from reactagenthlt.agents.language_model import TokenUsage
+from reactagenthlt.agents.react import run_react
 from reactagenthlt.tools import SearchEngine
 
 
@@ -53,16 +54,18 @@ class TestDenseControllerIntegration(unittest.TestCase):
             self.assertEqual(FakeSentenceTransformer.document_encodings, 1)
             self.assertEqual(cached_engine.search("water").iloc[0]["title"], "River")
 
-            contexts = []
+            messages = []
             responses = iter(["Action: Search[water]", "Action: Finish[River]"])
 
-            def generate(context):
-                contexts.append(context)
-                return next(responses)
+            def generate(chat):
+                messages.append(chat)
+                return next(responses), TokenUsage(0, 0)
 
-            answer = run_react("Where does water flow?", generate, engine)
-            self.assertEqual(answer, "River")
-            self.assertIn("Observation: River\n\nWater flows.", contexts[1])
+            result = run_react(
+                "Where does water flow?", generate, task="hotpotqa", search_engine=engine
+            )
+            self.assertEqual(result.answer, "River")
+            self.assertIn("Observation: River\n\nWater flows.", messages[1][-1]["content"])
 
 
 if __name__ == "__main__":

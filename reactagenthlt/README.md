@@ -7,19 +7,19 @@ The `agents` package separates model generation from agent behavior:
 - `LanguageModel` loads a Hugging Face model once and exposes `generate()`.
 - `BaseAgent` defines `ask()` and provides shared conversation state,
   `add_system_prompt()`, and `clear_ctx()`.
-- `Agent` (in `agents/standard.py`) performs one generation per request.
-- `ReActAgent` (in `agents/react.py`) is currently a scaffold: its `ask()`
-  performs one generation, not the ReAct loop. For a working ReAct loop,
-  use `controller.run_react()` below.
+- `StandardAgent` performs one generation per chat turn.
+- `ReActAgent` runs a question through the shared strict experiment loop.
+  `ask()` returns a vanilla ReAct answer and model-call totals, and `run()`
+  returns the full trace for a chosen condition.
 
 Agents receive an existing `LanguageModel` rather than a configuration path:
 
 ```python
-from reactagenthlt.agents import Agent, LanguageModel, ReActAgent
+from reactagenthlt.agents import LanguageModel, ReActAgent, StandardAgent
 from reactagenthlt.tools import Calculator, SearchEngine
 
 model = LanguageModel("path/to/model-config.json")
-agent = Agent(model)
+agent = StandardAgent(model)
 agent.add_system_prompt("You are a helpful assistant.")
 response = agent.ask("Hello!", do_sample=False, stream=False)
 print(response.output)
@@ -27,27 +27,29 @@ print(response.token_usage)
 print(response.generation_time)
 agent.clear_ctx()  # Keeps system prompts and model configuration.
 
-# The same model can be shared; each agent has its own conversation history.
+# The same model can be shared. ReAct starts a fresh context for each question.
 react_agent = ReActAgent(
     model,
+    task="hotpotqa",
     search_engine=SearchEngine(kind="sparse", search_by="document", top_k=2),
     calculator=Calculator(),
-    max_steps=7,
 )
+result = react_agent.run("Your question", mode="focused_react")
+print(result.answer, result.termination)
 ```
 
-`search_engine` is optional and defaults to `None`; the calculator defaults to
-an independent `Calculator` instance when omitted. `max_steps` must be positive
-and is reserved for the future ReAct loop; it does not yet affect `ask()`.
-Tools are stored on explicit `search_engine` and `calculator` attributes.
+HotpotQA tool-using conditions require a search engine. GSM8K uses the provided
+calculator or creates one. The default ordinary step limits are seven for
+HotpotQA and nine for GSM8K. An explicit `max_steps` overrides the default.
 
 Sampling and streaming are per-request options on `ask()`. For direct model
 calls, `LanguageModel.generate()` also accepts `stop_criteria`, a tuple of regex
 patterns. Matching text is retained in the output.
 
-The standard agent's `Response` contains the generated `output`, `token_usage`,
-and `generation_time` in seconds for the model call. The ReAct scaffold currently
-uses the same single-call metrics.
+Both `ask()` methods return `Response` with `output`, `token_usage`, and
+`generation_time`. `ReActAgent` sums the tokens and generation time over all
+calls, including a forced finalization call when applicable. The original
+`controller.run_react()` interface is documented below.
 
 Run the interactive standard agent from the repository root:
 

@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Iterable
 from decimal import Decimal
 
-from reactagenthlt.agents.experiment import BASELINES, RunResult
+from reactagenthlt.agents.react import BASELINES, RunResult
 
 
 FORMAT_FAILURES = {"missing_action", "malformed_action", "multiple_actions"}
@@ -79,7 +79,7 @@ def diagnose_formats(results: Iterable[RunResult]) -> dict:
         text = result.steps[-1].raw_output or ""
         categories = _format_deviations(text, result.mode)
         if result.termination not in FORMAT_FAILURES:
-            categories &= {"empty_argument"}
+            categories &= {"empty_argument", "capitalization"}
         if categories:
             counts.update(categories)
             affected_calls += 1
@@ -88,15 +88,15 @@ def diagnose_formats(results: Iterable[RunResult]) -> dict:
 
 def summarize_run(result: RunResult, supporting_documents: set[str] | None = None) -> dict:
     """Collect the counts and times for one result, including failed runs."""
-    token_counts = [step.token_usage for step in result.steps if step.token_usage is not None]
+    tokens = result.token_usage
     summary = {
         "termination": result.termination,
         "model_calls": len(result.steps),
         "ordinary_calls": sum(not step.forced for step in result.steps),
         "tool_calls": sum(step.tool_called for step in result.steps),
-        "prompt_tokens": sum(tokens.input_tokens for tokens in token_counts),
-        "completion_tokens": sum(tokens.output_tokens for tokens in token_counts),
-        "generation_seconds": sum(step.generation_time for step in result.steps),
+        "prompt_tokens": tokens.input_tokens,
+        "completion_tokens": tokens.output_tokens,
+        "generation_seconds": result.generation_time,
         "elapsed_seconds": result.elapsed_seconds,
         "invalid_reply_calls": int(result.termination in INVALID_REPLIES),
         "repeated_actions": sum(step.repeated for step in result.steps),
@@ -107,7 +107,6 @@ def summarize_run(result: RunResult, supporting_documents: set[str] | None = Non
         ),
         "invalid_calculations": int(
             result.termination == "invalid_tool_input"
-            and bool(result.steps)
             and result.steps[-1].action == "Calculate"
         ),
     }
