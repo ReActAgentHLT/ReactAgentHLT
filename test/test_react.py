@@ -57,7 +57,7 @@ class TestExperimentRules(unittest.TestCase):
                 self.assertTrue(result.steps[2].repeated)
                 self.assertEqual(result.steps[-1].forced, forced)
                 if forced:
-                    self.assertTrue(prompts[-1].endswith("Action: Finish[number]"))
+                    self.assertTrue(prompts[-1].endswith("Action: Finish[answer]"))
                     self.assertEqual(
                         sum("Observation: 5" in message["content"] for message in history[-1]),
                         1,
@@ -69,7 +69,7 @@ class TestExperimentRules(unittest.TestCase):
                 self.assertEqual(summary["completion_tokens"], 8)
                 self.assertEqual(score_answer(result, "5"), {"accuracy": 1.0})
 
-    def test_task_budgets_and_extra_finish_call(self):
+    def test_default_budget_and_extra_finish_call(self):
         outputs = [f"Action: Calculate[{n}+1]" for n in range(9)]
         generate = scripted_generator(*outputs)
         result = run_react("Question?", generate, task="gsm8k", mode="focused_react")
@@ -95,9 +95,9 @@ class TestExperimentRules(unittest.TestCase):
             "Action: Calculate(2 + 3)": "malformed_action",
             "Thought: I can guess.\nObservation: 5\nAction: Finish[5]": "malformed_action",
             "Action: calculate[2 + 3]": "unsupported_action",
-            "Action: Search[thing]": "unsupported_action",
+            "Action: Fly[thing]": "unsupported_action",
             "Action: Calculate[1 / 0]": "invalid_tool_input",
-            "Action: Finish[five]": "invalid_final_answer",
+            "Action: Finish[answer]": "invalid_final_answer",
         }
         results = []
         for text, reason in examples.items():
@@ -129,7 +129,8 @@ class TestExperimentRules(unittest.TestCase):
         self.assertEqual(result.steps[0].argument, "1000000 / 2000 + 1000.5")
         self.assertEqual(result.steps[0].observation, "1500.5")
         self.assertFalse(result.steps[1].repeated)
-        self.assertEqual(result.answer, "1500.5")
+        self.assertEqual(result.answer, "1,500.5")
+        self.assertEqual(score_answer(result, "1500.5"), {"accuracy": 1.0})
         for expression in ("1,0000 + 1", "12,34 + 1", "12345,678 + 1", "0.5,000 + 1"):
             with self.subTest(expression=expression):
                 generate = scripted_generator(f"Action: Calculate[{expression}]")
@@ -423,16 +424,36 @@ class TestReActLoop(unittest.TestCase):
 
     def test_missing_search_engine(self):
         """
-        Report an error when HotpotQA has no search engine.
+        Report an error when Search is requested without a search engine.
 
-        Changed: checked before the first model call and recorded as
-        `tool_error`, instead of raising ValueError when Search is requested.
+        Changed: recorded as `tool_error` when the model calls Search,
+        instead of raising ValueError. Agents without a search engine can
+        still solve problems that need no search.
         """
-        generate = Mock()
-        result = run_react("Where was Hideaki Anno born?", generate, task="hotpotqa")
+        generate = scripted_generator("Action: Search[Hideaki Anno]")
+        result = run_react("Where was Hideaki Anno born?", generate)
 
         self.assertEqual(result.termination, "tool_error")
-        generate.assert_not_called()
+        self.assertIsNone(score_answer(result, "Ube"))
+
+    def test_every_agent_can_use_every_tool(self):
+        """No dataset restricts the tools: Search and Calculate work in one run."""
+        search = Mock(spec=SearchEngine)
+        search.search.return_value = pd.DataFrame({"document": ["Evidence"]})
+        generate = scripted_generator(
+            "Action: Search[thing]", "Action: Calculate[2 + 3]", "Action: Finish[5]"
+        )
+        result = run_react("Question?", generate, search_engine=search)
+        self.assertEqual(result.termination, "finished")
+        self.assertEqual(result.answer, "5")
+        self.assertEqual(summarize_run(result)["tool_calls"], 2)
+
+    def test_gsm8k_scoring_validates_the_answer_format(self):
+        for answer, correct in [("5", 1.0), ("+5.00", 1.0), ("five", 0.0), ("5 apples", 0.0)]:
+            with self.subTest(answer=answer):
+                generate = scripted_generator(f"Action: Finish[{answer}]")
+                result = run_react("Question?", generate, task="gsm8k")
+                self.assertEqual(score_answer(result, "5"), {"accuracy": correct})
 
     def test_calculation_error_ends_the_run(self):
         """

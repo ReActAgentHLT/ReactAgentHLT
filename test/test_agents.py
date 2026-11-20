@@ -84,7 +84,7 @@ class TestAgents(unittest.TestCase):
         self.assertIsNone(first.search_engine)
         self.assertIsInstance(first.calculator, Calculator)
         self.assertIsNot(first.calculator, second.calculator)
-        self.assertEqual(first.max_steps, 7)
+        self.assertEqual(first.max_steps, 9)
 
     def test_react_rejects_invalid_step_limit(self):
         for max_steps in (0, -1):

@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 
 from reactagenthlt.agents.react import BASELINES, RunResult
+from reactagenthlt.preprocessing import GSM8K_NUMBER
 
 
 FORMAT_FAILURES = {"missing_action", "malformed_action", "multiple_actions"}
@@ -130,8 +131,9 @@ def score_answer(result: RunResult, reference: str) -> dict[str, float] | None:
     if result.termination in INFRASTRUCTURE_FAILURES:
         return None
     if result.task == "gsm8k":
-        correct = result.answer is not None and (
-            Decimal(result.answer) == Decimal(reference.replace(",", ""))
+        answer = (result.answer or "").strip()
+        correct = bool(re.fullmatch(GSM8K_NUMBER, answer)) and (
+            Decimal(answer.replace(",", "")) == Decimal(reference.replace(",", ""))
         )
         return {"accuracy": float(correct)}
     if result.answer is None:

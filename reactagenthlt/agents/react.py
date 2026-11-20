@@ -4,7 +4,9 @@ The loop (`run_react`) and the action parser (`parse_action`) come from
 Omar's `controller.py`. They were moved here and changed only where the
 agreed experiment rules require it: a strict parser, task-specific tools,
 recorded terminations instead of exceptions, and the Focused ReAct
-interventions. Tools are Federico's `Calculator` and `SearchEngine`, called
+interventions. Every ReAct agent can use every tool and picks the action
+that suits its goal; the dataset and the step budget are experiment
+settings chosen by the caller. Tools are Federico's `Calculator` and `SearchEngine`, called
 directly: their own input checks and errors decide what is invalid.
 """
 
@@ -17,13 +19,13 @@ from time import perf_counter
 from reactagenthlt.agents.base import BaseAgent, Response
 from reactagenthlt.agents.language_model import LanguageModel, TokenUsage
 from reactagenthlt.agents.prompts import COT, DIRECT, FORCE_FINISH, REACT, REITERATE
-from reactagenthlt.preprocessing import GSM8K_NUMBER
 from reactagenthlt.tools import Calculator, SearchEngine
 from reactagenthlt.tools.search_engine import RetrievalTokenizer
 
 
-TASK_TOOLS = {"hotpotqa": "Search", "gsm8k": "Calculate"}
-STEP_LIMITS = {"hotpotqa": 7, "gsm8k": 9}
+TOOLS = {"Search", "Calculate"}
+TASKS = {"hotpotqa", "gsm8k"}
+DEFAULT_MAX_STEPS = 9
 BASELINES = {"direct": DIRECT, "cot": COT}
 AGENT_MODES = {"react", "focused_react"}
 
@@ -59,7 +61,7 @@ class StepTrace:
 
 @dataclass
 class RunResult:
-    task: str
+    task: str | None
     mode: str
     answer: str | None = None
     termination: str = "budget_exhausted"
@@ -124,11 +126,7 @@ def parse_action(model_output: str, mode: str = "react", forced: bool = False) -
     return match[1], match[2]
 
 
-def _final_answer(argument: str, task: str) -> str:
-    if task == "gsm8k":
-        if not re.fullmatch(GSM8K_NUMBER, argument):
-            raise InvalidOutput("invalid_final_answer")
-        return argument.replace(",", "")
+def _final_answer(argument: str) -> str:
     cleaned = argument.strip("<> ").lower()
     if cleaned in {"", "answer", "final answer", "your answer", "number"}:
         raise InvalidOutput("invalid_final_answer")
@@ -139,8 +137,8 @@ def _read_step(text: str, step: StepTrace, result: RunResult) -> None:
     step.action, step.raw_argument = parse_action(text, result.mode, step.forced)
     step.argument = step.raw_argument.strip()
     if step.action == "Finish":
-        result.answer = _final_answer(step.argument, result.task)
-    elif step.forced or step.action != TASK_TOOLS[result.task]:
+        result.answer = _final_answer(step.argument)
+    elif step.forced or step.action not in TOOLS:
         raise InvalidOutput("unsupported_action")
     elif step.action == "Search":
         step.argument = " ".join(SEARCH_TOKENIZER.tokenize(step.argument))
@@ -191,8 +189,8 @@ def run_react(
     question: str,
     generate: Generate,
     *,
-    task: str,
     mode: str = "react",
+    task: str | None = None,
     search_engine: SearchEngine | None = None,
     calculator: Calculator | None = None,
     max_steps: int | None = None,
@@ -215,25 +213,31 @@ def run_react(
         question: The original question to be answered.
         generate: A function that receives the chat messages and returns
                   the generated text and its token usage.
-        task: "hotpotqa" (Search) or "gsm8k" (Calculate).
         mode: "direct", "cot", "react" or "focused_react".
-        search_engine: The shared SearchEngine, required for HotpotQA agents.
+        task: "hotpotqa" or "gsm8k". Required by the direct and CoT
+              prompts; for the ReAct modes it is only a label stored in the
+              result for the evaluation, and the agent never reads it.
+        search_engine: The shared SearchEngine. A Search action without one
+                       ends the run as a tool error.
         calculator: An existing Calculator instance (a new one by default).
-        max_steps: Maximum number of ordinary model calls (default: 7 for
-                   HotpotQA, 9 for GSM8K).
+        max_steps: Maximum number of ordinary model calls (default: 9).
         system_prompts: System messages sent before the question.
 
     Returns:
         The answer, the termination reason and a trace of every model call.
 
     Raises:
-        ValueError: For an unknown task or mode, an empty question or a step
-                    limit below 1.
+        ValueError: For an unknown task or mode, a baseline without a task,
+                    an empty question or a step limit below 1.
     """
 
     # Reject invalid settings and empty questions before starting the agent.
-    if task not in TASK_TOOLS or (mode not in BASELINES and mode not in AGENT_MODES):
+    if (task is not None and task not in TASKS) or (
+        mode not in BASELINES and mode not in AGENT_MODES
+    ):
         raise ValueError("Unknown task or mode.")
+    if mode in BASELINES and task is None:
+        raise ValueError("The direct and CoT baselines need a task.")
     question = question.strip()
     if not question:
         raise ValueError("Question cannot be empty.")
@@ -242,22 +246,16 @@ def run_react(
     if max_steps is not None and max_steps < 1:
         raise ValueError("Maximum steps must be at least 1.")
 
-    # A search action requires an initialized search engine.
     result = RunResult(task, mode)
-    if task == "hotpotqa" and mode in AGENT_MODES and search_engine is None:
-        result.termination = "tool_error"
-        result.error = "A shared HotpotQA search engine is required."
-        return result
-
     start = perf_counter()
     focused = mode == "focused_react"
-    budget = 1 if mode in BASELINES else (max_steps or STEP_LIMITS[task])
+    budget = 1 if mode in BASELINES else (max_steps or DEFAULT_MAX_STEPS)
 
     calculator = calculator or Calculator()
 
     # Start the conversation with the task instructions and the original question.
     messages = list(system_prompts)
-    prompt = f"{BASELINES.get(mode, REACT)[task]}\n\nQuestion: {question}\n"
+    prompt = f"{BASELINES[mode][task] if mode in BASELINES else REACT}\n\nQuestion: {question}\n"
     seen_actions = set()
 
     # Run the agent for a limited number of steps.
@@ -282,17 +280,19 @@ def run_react(
         # Focused ReAct early stop: ask for the final answer instead of
         # repeating the tool. This one extra call is allowed past the budget.
         if focused and step.repeated:
-            answer = "number" if task == "gsm8k" else "answer"
-            finish = FORCE_FINISH.format(question=question, answer=answer)
+            finish = FORCE_FINISH.format(question=question, answer="answer")
             _call_model(generate, messages, finish, result, forced=True)
             break
 
         # Execute the requested tool with Federico's tools. A calculator error
         # means the model's expression was invalid, so the run ends as a wrong
-        # answer; a search error is an infrastructure failure, reported apart.
+        # answer; a search error (including a missing search engine) is an
+        # infrastructure failure, reported apart.
         step.tool_called = True
         try:
             if step.action == "Search":
+                if search_engine is None:
+                    raise RuntimeError("A shared search engine is required for Search.")
                 results = search_engine.search(step.raw_argument.strip())
                 step.documents = results["document"].tolist()
                 step.observation = "\n\n".join(step.documents)
@@ -314,7 +314,11 @@ def run_react(
 
 
 class ReActAgent(BaseAgent):
-    """Answer independent questions with the ReAct loop above."""
+    """Answer independent questions with the ReAct loop above.
+
+    `task` is an optional evaluation label (needed only for the direct and CoT
+    baselines); it does not change the ReAct prompt, tools or step budget.
+    """
 
     def __init__(
         self,
@@ -323,9 +327,9 @@ class ReActAgent(BaseAgent):
         calculator: Calculator | None = None,
         max_steps: int | None = None,
         *,
-        task: str = "hotpotqa",
+        task: str | None = None,
     ) -> None:
-        if task not in STEP_LIMITS:
+        if task is not None and task not in TASKS:
             raise ValueError("Unknown experiment task.")
         if max_steps is not None and max_steps < 1:
             raise ValueError("Maximum steps must be at least 1.")
@@ -333,7 +337,7 @@ class ReActAgent(BaseAgent):
         self.search_engine = search_engine
         self.calculator = calculator if calculator is not None else Calculator()
         self.task = task
-        self.max_steps = max_steps or STEP_LIMITS[task]
+        self.max_steps = max_steps or DEFAULT_MAX_STEPS
 
     def run(
         self,

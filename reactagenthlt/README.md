@@ -30,7 +30,6 @@ agent.clear_ctx()  # Keeps system prompts and model configuration.
 # The same model can be shared. ReAct starts a fresh context for each question.
 react_agent = ReActAgent(
     model,
-    task="hotpotqa",
     search_engine=SearchEngine(kind="sparse", search_by="document", top_k=2),
     calculator=Calculator(),
 )
@@ -38,9 +37,13 @@ result = react_agent.run("Your question", mode="focused_react")
 print(result.answer, result.termination)
 ```
 
-HotpotQA tool-using conditions require a search engine. GSM8K uses the provided
-calculator or creates one. The default ordinary step limits are seven for
-HotpotQA and nine for GSM8K. An explicit `max_steps` overrides the default.
+Every ReAct agent can use every tool (`Search`, `Calculate`) and chooses the
+action that suits its goal; one generic prompt is used for all datasets. A
+`Search` action without a search engine ends the run as a `tool_error`. The
+dataset (`task`) and the step budget (`max_steps`, default nine) are
+evaluation settings: `task` is only a label used for scoring (and to pick the
+direct/CoT baseline prompt), and the GSM8K number format is checked at scoring
+time.
 
 Sampling and streaming are per-request options on `ask()`. For direct model
 calls, `LanguageModel.generate()` also accepts `stop_criteria`, a tuple of regex

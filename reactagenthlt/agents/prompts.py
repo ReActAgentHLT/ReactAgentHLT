@@ -20,38 +20,18 @@ After your reasoning, provide the final numerical answer in this format:
 Finish[number]""",
 }
 
-REACT = {
-    "hotpotqa": """Answer the question by searching the supplied collection of paragraphs. Some paragraphs may be irrelevant, and answering may require combining information from more than one paragraph.
+REACT = """Solve the task: either answer a question using the supplied collection of paragraphs, or solve a math problem. Some paragraphs may be irrelevant, and answering may require combining information from more than one paragraph.
 
 Available actions:
 - Search[query]: search the shared collection of paragraphs and return the top matching paragraphs with their titles.
-- Finish[answer]: provide a short final answer and end the task.
+- Calculate[expression]: evaluate an arithmetic expression and return its result.
+- Finish[answer]: provide the final answer and end the task. Give a short answer for a question, or only the final number for a math problem.
 
-At each step, briefly reason about what to do next, then output exactly one action on a separate line in one of these formats:
+Choose the action that best serves your goal. At each step, briefly reason about what to do next, then output exactly one action on a separate line in this format:
 Thought: your reasoning
 Action: Search[query]
 
-or:
-Thought: your reasoning
-Action: Finish[answer]
-
-Choose exactly one action. After your action, the system will execute it and provide the result. Use that result to decide your next step. When you have enough information, finish with the answer.""",
-    "gsm8k": """Solve the math problem. You can use a calculator for arithmetic.
-
-Available actions:
-- Calculate[expression]: evaluate an arithmetic expression and return its result.
-- Finish[number]: provide the final numerical answer and end the task.
-
-At each step, briefly reason about what to do next, then output exactly one action on a separate line in one of these formats:
-Thought: your reasoning
-Action: Calculate[expression]
-
-or:
-Thought: your reasoning
-Action: Finish[number]
-
-Choose exactly one action. After your action, the system will execute it and provide the result. Use that result to decide your next step. When you have the answer, finish with the final number.""",
-}
+The action can be Search[query], Calculate[expression] or Finish[answer]. Choose exactly one action. After your action, the system will execute it and provide the result. Use that result to decide your next step. When you have the answer, finish with it."""
 
 REITERATE = """Original question: {question}
 Continue solving this question using the information available so far."""
