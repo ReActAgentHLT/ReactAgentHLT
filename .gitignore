@@ -4,4 +4,5 @@ uv.lock
 **.egg-info/
 /results/
 .claude/
-
+analysis/out/
+analysis/fake_results/
