@@ -3,7 +3,9 @@
 import re
 import string
 from collections import Counter
+from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pandas as pd
 from tqdm import tqdm
@@ -21,6 +23,9 @@ FAILED_ACTIONS = {
     "unsupported_action", "invalid_tool_input", "invalid_final_answer",
 }
 CONFIG = ["model", "dataset", "mode", "k", "budget"]
+# A HotpotQA answer counts as correct (for `actions_correct`) from this F1 on.
+F1_THRESHOLD = 0.5
+RESULTS_DIR = Path(__file__).resolve().parents[1] / "results"
 NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 THOUSANDS_COMMA = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 
@@ -82,7 +87,7 @@ def score_run(result: RunResult, row: pd.Series, dataset: str) -> dict:
     }
     if dataset == "hotpotqa":
         record.update(hotpotqa_scores(result.answer, row["answer"]))
-        record["correct"] = bool(record["em"])
+        record["correct"] = record["f1"] >= F1_THRESHOLD
         support = hotpotqa_supporting_documents(row)
         searches = [
             set(step.documents) for step in result.steps
@@ -138,6 +143,22 @@ def evaluate(
         result = agent.run(row["question"], mode=mode)
         records.append(config | score_run(result, row, dataset))
     return pd.DataFrame(records)
+
+
+def save_results(df: pd.DataFrame, directory: str | Path = RESULTS_DIR) -> Path:
+    """
+    Save one `evaluate` run as CSV named by date, time and configuration, e.g.
+    `2026-11-21_15-30_Qwen2.5-3B-Instruct-4bit_gsm8k_focused_react_k2_b9.csv`.
+    """
+    run = df.iloc[0]
+    name = "_".join([
+        datetime.now().strftime("%Y-%m-%d_%H-%M"), run["model"].split("/")[-1],
+        run["dataset"], run["mode"], f"k{run['k']}", f"b{run['budget']}",
+    ])
+    path = Path(directory) / f"{name}.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+    return path
 
 
 def summarize(df: pd.DataFrame) -> pd.DataFrame:

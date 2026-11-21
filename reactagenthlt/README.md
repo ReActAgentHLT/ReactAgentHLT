@@ -81,7 +81,8 @@ summary = summarize(df)
 Per question: `actions` (model calls), `failed_action` (the run ended on a
 missing or invalid action), `seconds` (from the first call to the answer),
 `input_tokens` (new input only: the KV-cached prefix of each call is not
-counted), `output_tokens`, `correct`; for HotpotQA also `em`, `precision`,
+counted), `output_tokens`, `correct` (HotpotQA: F1 ≥ 0.5, used for the actions
+on correct answers); for HotpotQA also `em`, `precision`,
 `recall`, `f1` (official normalization) and `searches` / `gold_searches`
 (searches returning at least one gold paragraph). GSM8K answers are correct when
 the last number of the prediction, with thousands commas removed, equals the

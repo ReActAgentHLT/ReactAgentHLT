@@ -7,7 +7,7 @@ import torch
 from transformers import AutoModelForCausalLM, BatchEncoding, Gemma2Config, Qwen2Config
 from transformers.generation import GenerateDecoderOnlyOutput
 
-from reactagenthlt.agents.react import parse_action, run_react
+from reactagenthlt.agents.react import ReActAgent, parse_action, run_react
 from reactagenthlt.agents.language_model import LanguageModel, TokenUsage
 from reactagenthlt.evaluation import gsm8k_correct, hotpotqa_scores, score_run, summarize
 from reactagenthlt.preprocessing import hotpotqa_corpus, hotpotqa_supporting_documents
@@ -93,7 +93,7 @@ class TestExperimentRules(unittest.TestCase):
         examples = {
             "No command": "missing_action",
             "```\naction: calculate (2 + 3)\n```": "missing_action",
-            "Action: Calculate[2 + 3]\nAction: Finish[5]": "multiple_actions",
+            "Action: Calculate(2 + 3)\nAction: Finish[5]": "multiple_actions",
             "Action: Calculate(2 + 3)": "malformed_action",
             "Thought: I can guess.\nObservation: 5\nAction: Finish[5]": "malformed_action",
             "Action: calculate[2 + 3]": "unsupported_action",
@@ -182,7 +182,7 @@ class TestExperimentRules(unittest.TestCase):
         self.assertTrue(record["correct"])
         self.assertEqual(record["actions"], 3)
 
-    def test_transformers_generator_preserves_full_reply(self):
+    def test_reply_is_cut_after_the_first_action(self):
         model = LanguageModel.__new__(LanguageModel)
         model.config = {"max_new_tokens": 256}
         model.use_kv_cache = False
@@ -197,13 +197,28 @@ class TestExperimentRules(unittest.TestCase):
             sequences=torch.tensor([[1, 2, 3, 4, 5]])
         )
 
-        generate = partial(model.generate, strip_output=False)
-        result = run_react("Question?", generate, task="gsm8k")
+        result = ReActAgent(model, task="gsm8k").run("Question?")
 
-        self.assertFalse(model.model.generate.call_args.kwargs["stopping_criteria"])
-        self.assertEqual(result.steps[0].raw_output, raw)
+        self.assertEqual(len(model.model.generate.call_args.kwargs["stopping_criteria"]), 1)
+        self.assertEqual(result.steps[0].raw_output, " Action: Finish[5]")
         self.assertEqual(result.steps[0].token_usage, TokenUsage(3, 2))
-        self.assertEqual(result.termination, "multiple_actions")
+        self.assertEqual((result.termination, result.answer), ("finished", "5"))
+
+    def test_invented_observation_is_replaced_by_the_tool_result(self):
+        generate = scripted_generator(
+            "Thought: Add.\nAction: Calculate[2 + 3]\nObservation: 6\nAction: Finish[6]",
+            "Action: Finish[5]",
+        )
+        result = run_react("What is 2 + 3?", generate, task="gsm8k")
+        messages = generate.call_args.args[0]
+        self.assertEqual(messages[-2]["content"], "Thought: Add.\nAction: Calculate[2 + 3]")
+        self.assertEqual(messages[-1]["content"], "Observation: 5\n")
+        self.assertEqual((result.termination, result.answer), ("finished", "5"))
+
+    def test_baselines_are_not_cut(self):
+        generate = scripted_generator("Action: Finish[5]\nFinish[5]")
+        result = run_react("Question?", generate, task="gsm8k", mode="direct")
+        self.assertEqual(result.termination, "malformed_action")
 
 
 class TestKVCache(unittest.TestCase):

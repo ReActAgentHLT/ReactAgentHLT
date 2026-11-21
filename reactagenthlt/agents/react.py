@@ -29,6 +29,10 @@ BASELINES = {"direct": DIRECT, "cot": COT}
 AGENT_MODES = {"react", "focused_react"}
 
 ACTION_LINE = re.compile(r"Action: ([A-Za-z][A-Za-z0-9_]*)\[([^\[\]]*)\]")
+# The end of the first complete action, spacing tolerated: generation stops
+# here and the reply is cut here, so the model cannot write its own
+# observation or a second action. The strict parser then checks the format.
+ACTION_END = r"Action\s*:\s*[A-Za-z]\w*\s*\[[^\[\]]*\]"
 FINISH_LINE = re.compile(r"(Finish)\[([^\[\]]*)\]")
 CONTROL_LINE = re.compile(
     r"(?:Action\s*:|Observation\s*:|(?:Search|Calculate|Finish)\s*[\[(])", re.I
@@ -172,7 +176,8 @@ def _call_model(
         text, step.token_usage = generate(messages.copy())
         if not isinstance(text, str):
             raise TypeError("Expected model output as text.")
-        step.raw_output = text
+        end = re.search(ACTION_END, text) if result.mode in AGENT_MODES else None
+        text = step.raw_output = text[:end.end()] if end else text
     except Exception as error:
         result.termination = "model_error"
         result.error = f"{type(error).__name__}: {error}"
@@ -358,6 +363,7 @@ class ReActAgent(BaseAgent):
             do_sample=do_sample,
             stream=stream,
             strip_output=False,
+            stop_criteria=(ACTION_END,) if mode in AGENT_MODES else (),
         )
         return run_react(
             question,

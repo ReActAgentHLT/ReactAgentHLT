@@ -129,6 +129,15 @@ class TestAgents(unittest.TestCase):
         self.assertIn("What is 3 + 3?", messages[1]["content"])
         self.assertEqual(len(agent.system_prompts), 1)
 
+    def test_react_modes_stop_generation_after_the_action(self):
+        agent = ReActAgent(self.model, task="gsm8k")
+        for mode, stops in [("react", 1), ("focused_react", 1), ("direct", 0), ("cot", 0)]:
+            with self.subTest(mode=mode):
+                self.model.generate.side_effect = [("Action: Finish[5]", TokenUsage(5, 2))]
+                agent.run("What is 2 + 3?", mode=mode)
+                kwargs = self.model.generate.call_args.kwargs
+                self.assertEqual(len(kwargs["stop_criteria"]), stops)
+
     def test_focused_react_run_returns_trace_after_a_repeat(self):
         self.model.generate.side_effect = [
             ("Action: Calculate[2 + 3]", TokenUsage(5, 2)),
