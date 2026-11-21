@@ -1,17 +1,21 @@
 """Run an agent over a dataset and collect per-question metrics in a DataFrame."""
 
+import argparse
 import re
 import string
 from collections import Counter
+from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
+from itertools import count
 from pathlib import Path
 
 import pandas as pd
 from tqdm import tqdm
 
-from reactagenthlt.agents import LanguageModel, ReActAgent
-from reactagenthlt.agents.react import RunResult
+from reactagenthlt.agents import ReActAgent
+from reactagenthlt.agents.react import AGENT_MODES, BASELINES, RunResult
+from reactagenthlt.language_model import LanguageModel
 from reactagenthlt.preprocessing import hotpotqa_supporting_documents, load_gsm8k, load_hotpotqa
 from reactagenthlt.tools import SearchEngine
 
@@ -26,6 +30,7 @@ CONFIG = ["model", "dataset", "mode", "k", "budget"]
 # A HotpotQA answer counts as correct (for `actions_correct`) from this F1 on.
 F1_THRESHOLD = 0.5
 RESULTS_DIR = Path(__file__).resolve().parents[1] / "results"
+DEFAULT_BUDGETS = {"hotpotqa": 7, "gsm8k": 9}
 NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 THOUSANDS_COMMA = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 
@@ -155,10 +160,22 @@ def save_results(df: pd.DataFrame, directory: str | Path = RESULTS_DIR) -> Path:
         datetime.now().strftime("%Y-%m-%d_%H-%M"), run["model"].split("/")[-1],
         run["dataset"], run["mode"], f"k{run['k']}", f"b{run['budget']}",
     ])
-    path = Path(directory) / f"{name}.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
-    return path
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    for index in count():
+        suffix = f"_{index}" if index else ""
+        path = directory / f"{name}{suffix}.csv"
+        try:
+            output = path.open("x", encoding="utf-8", newline="")
+        except FileExistsError:
+            continue
+        try:
+            with output:
+                df.to_csv(output, index=False)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return path
 
 
 def summarize(df: pd.DataFrame) -> pd.DataFrame:
@@ -185,3 +202,49 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
             summary["accuracy"] = 100 * runs["correct"].mean()
         summaries.append(summary)
     return pd.DataFrame(summaries)
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return number
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    load_model: Callable[[str], LanguageModel] = LanguageModel,
+    model_choices: tuple[str, ...] | None = None,
+    output_dir: Path = RESULTS_DIR,
+) -> None:
+    """Run one evaluation from the terminal and save its per-question results."""
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument(
+        "model",
+        choices=model_choices,
+        help="local model to run" if model_choices else "path to a model config JSON",
+    )
+    parser.add_argument("--dataset", required=True, choices=DEFAULT_BUDGETS)
+    parser.add_argument("--mode", choices=sorted(AGENT_MODES | BASELINES.keys()), default="react")
+    parser.add_argument("-k", "--k", type=positive_int, default=3, help="paragraphs per search (default: 3)")
+    parser.add_argument("--budget", type=positive_int, help="action budget (default: 7 for HotpotQA, 9 for GSM8K)")
+    parser.add_argument("--n", type=positive_int, help="sample size (default: evaluate the full split)")
+    parser.add_argument("--seed", type=int, default=0, help="question sampling seed (default: 0)")
+    parser.add_argument("--output-dir", type=Path, default=output_dir, help="directory for per-question CSVs")
+    args = parser.parse_args(argv)
+    if not 0 <= args.seed < 2**32:
+        parser.error("--seed must be between 0 and 4294967295")
+    if model_choices is None and not Path(args.model).is_file():
+        parser.error(f"model config file does not exist: {args.model}")
+
+    budget = args.budget if args.budget is not None else DEFAULT_BUDGETS[args.dataset]
+    model = load_model(args.model)
+    frame = evaluate(model, args.dataset, args.k, budget, mode=args.mode, n=args.n, seed=args.seed)
+    path = save_results(frame, args.output_dir)
+    print(summarize(frame).round(3).to_string(index=False))
+    print(f"Saved {len(frame)} results to {path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -8,7 +8,7 @@ from transformers import AutoModelForCausalLM, BatchEncoding, Gemma2Config, Qwen
 from transformers.generation import GenerateDecoderOnlyOutput
 
 from reactagenthlt.agents.react import ReActAgent, parse_action, run_react
-from reactagenthlt.agents.language_model import LanguageModel, TokenUsage
+from reactagenthlt.language_model import LanguageModel, TokenUsage
 from reactagenthlt.evaluation import gsm8k_correct, hotpotqa_scores, score_run, summarize
 from reactagenthlt.preprocessing import hotpotqa_corpus, hotpotqa_supporting_documents
 from reactagenthlt.tools import SearchEngine

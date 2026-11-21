@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from reactagenthlt.agents.language_model import TokenUsage
+from reactagenthlt.language_model import TokenUsage
 from reactagenthlt.agents.react import run_react
 from reactagenthlt.tools import SearchEngine
 

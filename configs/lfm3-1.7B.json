@@ -1,9 +1,12 @@
 {
-    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "model": "LiquidAI/LFM3-1.7B",
     "max_new_tokens": 32768,
     "sampling": {
         "temperature": 0.6,
         "top_k": 20,
         "top_p": 0.95
+    },
+    "chat_template_kwargs": {
+        "enable_thinking": false
     }
 }

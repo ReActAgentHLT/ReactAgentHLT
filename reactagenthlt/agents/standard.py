@@ -1,7 +1,7 @@
 import time
 
 from reactagenthlt.agents.base import BaseAgent, Response
-from reactagenthlt.agents.language_model import LanguageModel
+from reactagenthlt.language_model import LanguageModel
 
 
 class StandardAgent(BaseAgent):

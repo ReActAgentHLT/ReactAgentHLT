@@ -1,11 +1,16 @@
 """Agent interface tests without loading model weights or a search index."""
 
+import io
+import json
+import tempfile
 import unittest
-from unittest.mock import Mock
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 from reactagenthlt.agents import (
     BaseAgent,
     LanguageModel,
+    LlamaCppLanguageModel,
     ReActAgent,
     Response,
     StandardAgent,
@@ -153,6 +158,116 @@ class TestAgents(unittest.TestCase):
         self.assertEqual(len(result.steps), 3)
         self.assertFalse(result.steps[1].tool_called)
         self.assertTrue(result.steps[-1].forced)
+
+
+class _FakeHTTPResponse:
+    def __init__(self, body: bytes) -> None:
+        self._stream = io.BytesIO(body)
+
+    def read(self, *args, **kwargs) -> bytes:
+        return self._stream.read(*args, **kwargs)
+
+    def __iter__(self):
+        return iter(self._stream)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class TestLlamaCppLanguageModel(unittest.TestCase):
+    @staticmethod
+    def _sse(*events: dict) -> bytes:
+        return b"".join(
+            f"data: {json.dumps(event)}\n\n".encode("utf-8") for event in events
+        )
+
+    def test_config_backend_stop_criteria_and_kv_prefix_reuse(self):
+        requests_seen: list[tuple[str, dict]] = []
+
+        def fake_urlopen(request, timeout=None):
+            payload = json.loads(request.data.decode("utf-8"))
+            requests_seen.append((request.full_url, payload))
+            if request.full_url.endswith("/apply-template"):
+                return _FakeHTTPResponse(json.dumps({"prompt": "PROMPT"}).encode())
+            if len(requests_seen) == 2:
+                return _FakeHTTPResponse(
+                    self._sse(
+                        {
+                            "content": "Thought: calc.\nAction: Calculate[2+3]\nObservation: fake",
+                            "tokens_evaluated": 20,
+                            "tokens_predicted": 9,
+                            "timings": {"cache_n": 0},
+                        },
+                        {
+                            "stop": True,
+                            "tokens_evaluated": 20,
+                            "tokens_predicted": 9,
+                            "timings": {"cache_n": 0},
+                        },
+                    )
+                )
+            return _FakeHTTPResponse(
+                self._sse(
+                    {
+                        "content": " Action: Finish[5] ",
+                        "tokens_evaluated": 28,
+                        "tokens_predicted": 4,
+                        "timings": {"cache_n": 20},
+                    },
+                    {
+                        "stop": True,
+                        "tokens_evaluated": 28,
+                        "tokens_predicted": 4,
+                        "timings": {"cache_n": 20},
+                    },
+                )
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "lfm3-local.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "backend": "llama_cpp",
+                        "base_url": "http://127.0.0.1:8080",
+                        "model": "lfm3-1.7b-q6_k",
+                        "max_new_tokens": 256,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            model = LanguageModel(str(config_path))
+
+        with patch("reactagenthlt.language_model.urlopen", side_effect=fake_urlopen):
+            turn1 = [{"role": "user", "content": "What is 2 + 3?"}]
+            text1, usage1 = model.generate(
+                turn1,
+                stop_criteria=(r"Action\s*:\s*[A-Za-z]\w*\s*\[[^\[\]]*\]",),
+            )
+            turn2 = turn1 + [
+                {"role": "assistant", "content": text1},
+                {"role": "user", "content": "Observation: 5\n"},
+            ]
+            text2, usage2 = model.generate(turn2, strip_output=False)
+
+        self.assertEqual(text1, "Thought: calc.\nAction: Calculate[2+3]")
+        self.assertEqual(usage1, TokenUsage(20, 9, 0))
+        self.assertEqual(text2, " Action: Finish[5] ")
+        self.assertEqual(usage2, TokenUsage(28, 4, 20))
+        self.assertFalse(requests_seen[1][1]["cache_prompt"])
+        self.assertEqual(requests_seen[1][1]["temperature"], 0.0)
+        self.assertTrue(requests_seen[3][1]["cache_prompt"])
+
+    def test_direct_llama_cpp_client_and_reset_cache(self):
+        model = LlamaCppLanguageModel(
+            "http://127.0.0.1:8080/", "lfm3-1.7b-q6_k", max_new_tokens=128
+        )
+        self.assertEqual(model.config["model"], "lfm3-1.7b-q6_k")
+        self.assertEqual(model.config["base_url"], "http://127.0.0.1:8080")
+        model.reset_cache()
 
 
 if __name__ == "__main__":

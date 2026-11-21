@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from reactagenthlt.agents.language_model import LanguageModel, TokenUsage
+from reactagenthlt.language_model import LanguageModel, TokenUsage
 
 
 @dataclass

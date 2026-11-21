@@ -2,6 +2,7 @@
 
 DIRECT = {
     "hotpotqa": """Answer the question in exactly one line: Finish[answer]. Use a short name, fact, or yes/no as appropriate.
+Use plain text only. Write Finish[answer] without bullets, bold, backticks, or any other text.
 
 Examples:
 Question: In what country was the author of Pride and Prejudice born?
@@ -10,6 +11,7 @@ Finish[England]
 Question: Are the Eiffel Tower and the Louvre in the same city?
 Finish[yes]""",
     "gsm8k": """Solve the math problem. Return exactly one line: Finish[number]. Do not include units or an explanation.
+Use plain text only. Write Finish[number] without bullets, bold, backticks, or any other text.
 
 Examples:
 Question: Maya buys 3 packs of 8 pencils and gives away 5. How many does she have left?
@@ -21,6 +23,7 @@ Finish[5]""",
 
 COT = {
     "hotpotqa": """Answer the question. Briefly connect the facts needed to reach the answer, then end with one line in the form Finish[answer].
+Use plain text only. Write the final line exactly as Finish[answer], with no bullets, bold, backticks, or text after it.
 
 Examples:
 Question: In what country was the author of Pride and Prejudice born?
@@ -31,6 +34,7 @@ Question: Are the Eiffel Tower and the Louvre in the same city?
 The Eiffel Tower is in Paris, and so is the Louvre.
 Finish[yes]""",
     "gsm8k": """Solve the math problem. Show the key arithmetic steps, then end with one line in the form Finish[number]. Do not include units inside the brackets.
+Use plain text only. Write the final line exactly as Finish[number], with no bullets, bold, backticks, or text after it.
 
 Examples:
 Question: Maya buys 3 packs of 8 pencils and gives away 5. How many does she have left?
@@ -50,6 +54,7 @@ Available actions:
 - Finish[answer]: provide the final answer and end the task. Give a short answer for a question, or only the final number for a math problem.
 
 For each reply, give one brief Thought: line, then exactly one Action: line and stop. The system supplies Observation: lines after tool calls; never write one yourself. Use observations to refine your next query or finish when you have enough information. Do not repeat a tool call that already returned a result.
+Use plain text for both lines. Do not use bullets, bold, backticks, or add text after the Action: line.
 
 Example transcripts (each Observation: is supplied by the system):
 
@@ -71,8 +76,11 @@ Thought: The calculation gives the number left.
 Action: Finish[29]"""
 
 REITERATE = """Original question: {question}
-Continue solving this question using the information available so far."""
+Continue solving this question using the information available so far.
+Keep the Thought: and Action: lines in plain text, with no bullets, bold, or backticks."""
 
 FORCE_FINISH = """Original question: {question}
-Using the information collected so far, give your best final answer now. Do not request another tool action. Output only:
+Using the information collected so far, give your best final answer now. Do not request another tool action.
+Use plain text only, with no bullets, bold, backticks, or text after the action.
+Output only:
 Action: Finish[{answer}]"""

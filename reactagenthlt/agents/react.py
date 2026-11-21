@@ -10,17 +10,23 @@ settings chosen by the caller. Tools are Federico's `Calculator` and `SearchEngi
 directly: their own input checks and errors decide what is invalid.
 """
 
-import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from functools import partial
 from time import perf_counter
 
 from reactagenthlt.agents.base import BaseAgent, Response
-from reactagenthlt.agents.language_model import LanguageModel, TokenUsage
+from reactagenthlt.language_model import LanguageModel, TokenUsage
+from reactagenthlt.agents.parsing import (
+    ACTION_END,
+    InvalidOutput,
+    normalize_tool_argument,
+    parse_action,
+    truncate_after_action,
+    validate_final_answer,
+)
 from reactagenthlt.agents.prompts import COT, DIRECT, FORCE_FINISH, REACT, REITERATE
 from reactagenthlt.tools import Calculator, SearchEngine
-from reactagenthlt.tools.search_engine import RetrievalTokenizer
 
 TOOLS = {"Search", "Calculate"}
 TASKS = {"hotpotqa", "gsm8k"}
@@ -28,23 +34,7 @@ DEFAULT_MAX_STEPS = 9
 BASELINES = {"direct": DIRECT, "cot": COT}
 AGENT_MODES = {"react", "focused_react"}
 
-ACTION_LINE = re.compile(r"Action: ([A-Za-z][A-Za-z0-9_]*)\[([^\[\]]*)\]")
-# The end of the first complete action, spacing tolerated: generation stops
-# here and the reply is cut here, so the model cannot write its own
-# observation or a second action. The strict parser then checks the format.
-ACTION_END = r"Action\s*:\s*[A-Za-z]\w*\s*\[[^\[\]]*\]"
-FINISH_LINE = re.compile(r"(Finish)\[([^\[\]]*)\]")
-CONTROL_LINE = re.compile(
-    r"(?:Action\s*:|Observation\s*:|(?:Search|Calculate|Finish)\s*[\[(])", re.I
-)
-GROUPED_NUMBER = re.compile(r"(?<![\d.])\d{1,3}(?:,\d{3})+(?!\d)")
-SEARCH_TOKENIZER = RetrievalTokenizer()
-
 Generate = Callable[[list[dict[str, str]]], tuple[str, TokenUsage]]
-
-
-class InvalidOutput(ValueError):
-    """A model response that ends the run; the message is the termination reason."""
 
 
 @dataclass
@@ -88,73 +78,15 @@ class RunResult:
         return sum(step.generation_time for step in self.steps)
 
 
-# Action parsing
-
-
-def parse_action(
-    model_output: str, mode: str = "react", forced: bool = False
-) -> tuple[str, str]:
-    """
-    Extract an action and its exact argument from the language model's output.
-
-    The command must be the last non-blank line: `Action: Name[argument]` in the
-    ReAct modes, `Finish[answer]` in the direct and CoT baselines. Earlier lines
-    are allowed only as reasoning (CoT, or a ReAct reply that starts with
-    `Thought:`) and may not contain another command or an invented observation.
-
-    Raises:
-        InvalidOutput: The reply ends the run; the message is the reason.
-    """
-
-    # Split the model's output into separate non-blank lines.
-    lines = [line.strip() for line in model_output.splitlines() if line.strip()]
-    baseline = mode in BASELINES
-
-    # The controller expects exactly one command per model response.
-    prefix = "Finish[" if baseline else "Action:"
-    count = sum(line.startswith(prefix) for line in lines)
-    if not count:
-        raise InvalidOutput("missing_action")
-    if count > 1:
-        raise InvalidOutput("multiple_actions")
-
-    # Check the command format and extract its name and argument.
-    match = (FINISH_LINE if baseline else ACTION_LINE).fullmatch(lines[-1])
-    if not match:
-        raise InvalidOutput("malformed_action")
-
-    reasoning = lines[:-1]
-    if reasoning:
-        allow_reasoning = mode == "cot" or (
-            not baseline and not forced and reasoning[0].startswith("Thought:")
-        )
-        if not allow_reasoning or any(CONTROL_LINE.match(line) for line in reasoning):
-            raise InvalidOutput("malformed_action")
-    return match[1], match[2]
-
-
-def _final_answer(argument: str) -> str:
-    cleaned = argument.strip("<> ").lower()
-    if cleaned in {"", "answer", "final answer", "your answer", "number"}:
-        raise InvalidOutput("invalid_final_answer")
-    return argument
-
-
 def _read_step(text: str, step: StepTrace, result: RunResult) -> None:
     step.action, step.raw_argument = parse_action(text, result.mode, step.forced)
-    step.argument = step.raw_argument.strip()
     if step.action == "Finish":
-        result.answer = _final_answer(step.argument)
+        step.argument = step.raw_argument.strip()
+        result.answer = validate_final_answer(step.argument)
     elif step.forced or step.action not in TOOLS:
         raise InvalidOutput("unsupported_action")
-    elif step.action == "Search":
-        step.argument = " ".join(SEARCH_TOKENIZER.tokenize(step.argument))
     else:
-        step.argument = GROUPED_NUMBER.sub(
-            lambda m: m[0].replace(",", ""), step.argument
-        )
-    if not step.argument:
-        raise InvalidOutput("invalid_tool_input")
+        step.argument = normalize_tool_argument(step.action, step.raw_argument)
 
 
 # The ReAct loop
@@ -176,8 +108,9 @@ def _call_model(
         text, step.token_usage = generate(messages.copy())
         if not isinstance(text, str):
             raise TypeError("Expected model output as text.")
-        end = re.search(ACTION_END, text) if result.mode in AGENT_MODES else None
-        text = step.raw_output = text[:end.end()] if end else text
+        text = step.raw_output = (
+            truncate_after_action(text) if result.mode in AGENT_MODES else text
+        )
     except Exception as error:
         result.termination = "model_error"
         result.error = f"{type(error).__name__}: {error}"

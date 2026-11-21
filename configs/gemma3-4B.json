@@ -1,9 +1,0 @@
-{
-    "model": "google/gemma-3-4b-it",
-    "max_new_tokens": 32768,
-    "sampling": {
-        "temperature": 0.6,
-        "top_k": 20,
-        "top_p": 0.95
-    }
-}
