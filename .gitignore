@@ -2,3 +2,4 @@ __pycache__/
 .search_embeddings/
 uv.lock
 **.egg-info/
+/results/
