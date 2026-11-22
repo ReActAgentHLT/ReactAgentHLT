@@ -1,4 +1,8 @@
 """Paired bootstrap between agent modes (CoT vs ReAct, ReAct vs Focused ReAct...).
+
+Usage (from the repo root):
+    python analysis/bootstrap.py                  # reads results/*.csv
+    python analysis/bootstrap.py --results-dir analysis/fake_results
 """
 
 import argparse
@@ -8,7 +12,7 @@ import numpy as np
 import pandas as pd
 from common import CONFIG, load
 
-PAIRS = [("direct", "cot"), ("cot", "react"), ("react", "focused_react")]
+PAIRS = [("direct", "cot"), ("cot", "react"), ("react", "focused_react"), ("cot", "focused_react")]
 COST = ["seconds", "input_tokens", "output_tokens"]
 METRICS = {"hotpotqa": ["f1", "em", "correct"] + COST, "gsm8k": ["correct"] + COST}
 
@@ -28,6 +32,7 @@ def main() -> None:
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--n-boot", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--metrics", nargs="*", help="only print these metrics, e.g. f1 correct")
     args = parser.parse_args()
 
     df, rng, rows = load(args.results_dir), np.random.default_rng(args.seed), []
@@ -53,7 +58,8 @@ def main() -> None:
     out = Path(__file__).parent / "out"
     out.mkdir(exist_ok=True)
     table.to_csv(out / "bootstrap.csv", index=False)
-    print(table.to_string(index=False))
+    shown = table[table["metric"].isin(args.metrics)] if args.metrics else table
+    print(shown.to_string(index=False))
 
 
 if __name__ == "__main__":
