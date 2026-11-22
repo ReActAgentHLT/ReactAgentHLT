@@ -50,9 +50,10 @@ python -m reactagenthlt.evaluation configs/qwen2.5-3B.json --dataset hotpotqa --
 Use `--help` for all options. Results are saved as per-question CSVs in `results/` by default (ignored by git).
 
 Programmatic API:
-- `evaluate(model, dataset, k, budget, *, mode="react", n=None, seed=0)` → per-question `DataFrame`.
+- `evaluate(model, dataset, k, budget, *, mode="react", n=None, seed=0, verbose=False)` → per-question `DataFrame` (live running metrics on progress bar; pass `verbose=True` / `--verbose` for one status row per question).
 - `summarize(df)` → aggregated metrics per `(model, dataset, mode, k, budget)`.
 - `save_results(df, directory=RESULTS_DIR)` → writes a timestamped CSV.
+- `save_summary(summary, directory=RESULTS_DIR, stem="summary")` / `save_summary_png(summary, path)` → saves the summary table as CSV and PNG.
 
 Metrics per question:
 - Common: `actions`, `failed_action`, `seconds`, `input_tokens` (excluding KV-cached prefix), `output_tokens`, `correct`.

@@ -136,12 +136,18 @@ class TestAgents(unittest.TestCase):
 
     def test_react_modes_stop_generation_after_the_action(self):
         agent = ReActAgent(self.model, task="gsm8k")
-        for mode, stops in [("react", 1), ("focused_react", 1), ("direct", 0), ("cot", 0)]:
+        for mode, reply in [
+            ("react", "Action: Finish[5]"),
+            ("focused_react", "Action: Finish[5]"),
+            ("direct", "Finish[5]\nExtra commentary"),
+            ("cot", "2 + 3 = 5.\nFinish[5]\nExtra commentary"),
+        ]:
             with self.subTest(mode=mode):
-                self.model.generate.side_effect = [("Action: Finish[5]", TokenUsage(5, 2))]
-                agent.run("What is 2 + 3?", mode=mode)
+                self.model.generate.side_effect = [(reply, TokenUsage(5, 2))]
+                result = agent.run("What is 2 + 3?", mode=mode)
                 kwargs = self.model.generate.call_args.kwargs
-                self.assertEqual(len(kwargs["stop_criteria"]), stops)
+                self.assertEqual(len(kwargs["stop_criteria"]), 1)
+                self.assertEqual((result.termination, result.answer), ("finished", "5"))
 
     def test_focused_react_run_returns_trace_after_a_repeat(self):
         self.model.generate.side_effect = [

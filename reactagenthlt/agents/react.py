@@ -19,10 +19,12 @@ from reactagenthlt.agents.base import BaseAgent, Response
 from reactagenthlt.language_model import LanguageModel, TokenUsage
 from reactagenthlt.agents.parsing import (
     ACTION_END,
+    FINISH_END,
     InvalidOutput,
     normalize_tool_argument,
     parse_action,
     truncate_after_action,
+    truncate_after_finish,
     validate_final_answer,
 )
 from reactagenthlt.agents.prompts import COT, DIRECT, FORCE_FINISH, REACT, REITERATE
@@ -109,7 +111,9 @@ def _call_model(
         if not isinstance(text, str):
             raise TypeError("Expected model output as text.")
         text = step.raw_output = (
-            truncate_after_action(text) if result.mode in AGENT_MODES else text
+            truncate_after_action(text)
+            if result.mode in AGENT_MODES
+            else truncate_after_finish(text)
         )
     except Exception as error:
         result.termination = "model_error"
@@ -296,7 +300,7 @@ class ReActAgent(BaseAgent):
             do_sample=do_sample,
             stream=stream,
             strip_output=False,
-            stop_criteria=(ACTION_END,) if mode in AGENT_MODES else (),
+            stop_criteria=(ACTION_END,) if mode in AGENT_MODES else (FINISH_END,),
         )
         return run_react(
             question,

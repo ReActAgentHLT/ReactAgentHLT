@@ -10,6 +10,10 @@ ACTION_LINE = re.compile(r"Action: ([A-Za-z][A-Za-z0-9_]*)\[([^\[\]]*)\]")
 # here and the reply is cut here, so the model cannot write its own
 # observation or a second action. The strict parser then checks the format.
 ACTION_END = r"Action\s*:\s*[A-Za-z]\w*\s*\[[^\[\]]*\]"
+# The end of the first complete standalone Finish line in baseline modes
+# (direct / cot), so the model stops immediately after its final answer
+# without rambling past it.
+FINISH_END = r"(?:^|\n)\s*Finish\s*\[[^\[\]]*\]"
 FINISH_LINE = re.compile(r"(Finish)\[([^\[\]]*)\]")
 CONTROL_LINE = re.compile(
     r"(?:Action\s*:|Observation\s*:|(?:Search|Calculate|Finish)\s*[\[(])", re.I
@@ -26,6 +30,12 @@ class InvalidOutput(ValueError):
 def truncate_after_action(text: str) -> str:
     """Keep everything up to the end of the first complete Action line, if present."""
     end = re.search(ACTION_END, text)
+    return text[: end.end()] if end else text
+
+
+def truncate_after_finish(text: str) -> str:
+    """Keep everything up to the end of the first standalone Finish line, if present."""
+    end = re.search(FINISH_END, text)
     return text[: end.end()] if end else text
 
 
