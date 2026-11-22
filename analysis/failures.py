@@ -2,7 +2,7 @@
 
 Usage (from the repo root):
     python analysis/failures.py counts            # termination reasons of wrong runs
-    python analysis/failures.py sheet --per-group 25
+    python analysis/failures.py sheet --per-group 25 [--models gemma qwen --modes react focused_react --datasets hotpotqa]
     python analysis/failures.py summary           # after filling the 'category' column
 """
 
@@ -36,8 +36,16 @@ def counts(df: pd.DataFrame) -> None:
     print(table.round(1).to_string())
 
 
-def sheet(df: pd.DataFrame, per_group: int, seed: int) -> None:
+def sheet(df: pd.DataFrame, per_group: int, seed: int, models=None, modes=None, datasets=None) -> None:
     wrong = df[~df["correct"]]
+    if models:  # substring match, e.g. gemma qwen
+        wrong = wrong[wrong["model"].str.contains("|".join(models), case=False)]
+    if modes:
+        wrong = wrong[wrong["mode"].isin(modes)]
+    if datasets:
+        wrong = wrong[wrong["dataset"].isin(datasets)]
+    if wrong.empty:
+        raise SystemExit("No wrong runs match these filters.")
     shuffled = wrong.sample(frac=1, random_state=seed)  # random order, then first N per group
     sample = shuffled.groupby(CONFIG + ["mode"]).head(per_group)
     columns = CONFIG + ["mode", "question", "gold", "prediction", "termination", "actions"]
@@ -68,9 +76,12 @@ if __name__ == "__main__":
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--per-group", type=int, default=25)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--models", nargs="*", help="only these models (substring), e.g. gemma qwen")
+    parser.add_argument("--modes", nargs="*", help="only these modes, e.g. react focused_react")
+    parser.add_argument("--datasets", nargs="*", help="only these datasets, e.g. hotpotqa")
     args = parser.parse_args()
     if args.command == "summary":
         summary()
     else:
         data = load(args.results_dir)
-        counts(data) if args.command == "counts" else sheet(data, args.per_group, args.seed)
+        counts(data) if args.command == "counts" else sheet(data, args.per_group, args.seed, args.models, args.modes, args.datasets)
